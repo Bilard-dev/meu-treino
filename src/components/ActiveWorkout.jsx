@@ -54,6 +54,15 @@ export default function ActiveWorkout({
     loadInitialData();
   }, [profile.id, currentGym?.id]);
 
+  // Atualiza as referências de carga se o usuário trocar de academia no topo
+  useEffect(() => {
+    if (sessionExercises && sessionExercises.length > 0) {
+      sessionExercises.forEach(item => {
+        if (item.exercise) fetchLastLoad(item.exercise);
+      });
+    }
+  }, [currentGym?.id]);
+
   // Recupera treino em andamento se o app fechou (Anti-Perda)
   useEffect(() => {
     try {
@@ -150,34 +159,73 @@ export default function ActiveWorkout({
     }
   }
 
-  // Buscar última carga inteligente para um exercício
+  // Buscar última carga inteligente para um exercício:
+  // 1. Sempre busca o MAIOR peso da sessão mais recente.
+  // 2. Se for máquina e não houver registro na academia atual, mostra o maior peso de outra academia como referência.
   async function fetchLastLoad(exercise) {
     if (!exercise) return;
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from('workout_sets')
         .select(`
-          weight_kg, reps, created_at,
-          workout_sessions!inner(gym_id, gyms(name))
+          weight_kg, reps, created_at, session_id,
+          workout_sessions!inner(id, date, gym_id, gyms(name))
         `)
         .eq('exercise_id', exercise.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .order('created_at', { ascending: false });
 
-      // Se for MÁQUINA, filtra apenas pela academia atual!
-      if (exercise.type === 'machine' && currentGym?.id) {
-        query = query.eq('workout_sessions.gym_id', currentGym.id);
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        setLastLoads(prev => {
+          const next = { ...prev };
+          delete next[exercise.id];
+          return next;
+        });
+        return;
       }
 
-      const { data } = await query;
-      if (data && data.length > 0) {
-        const item = data[0];
+      const isMachine = exercise.type === 'machine';
+      let chosenSets = [];
+      let isReference = false;
+
+      if (isMachine && currentGym?.id) {
+        // Filtra os registros da academia atual
+        const gymSets = data.filter(s => s.workout_sessions?.gym_id === currentGym.id);
+
+        if (gymSets.length > 0) {
+          // Pega a sessão mais recente desta academia
+          const latestSessionId = gymSets[0].session_id;
+          chosenSets = gymSets.filter(s => s.session_id === latestSessionId);
+          isReference = false;
+        } else {
+          // NÃO tem registro nesta academia: usa a sessão mais recente de OUTRA academia como referência!
+          const latestSessionId = data[0].session_id;
+          chosenSets = data.filter(s => s.session_id === latestSessionId);
+          isReference = true;
+        }
+      } else {
+        // Peso livre, calistenia ou sem academia selecionada
+        const latestSessionId = data[0].session_id;
+        chosenSets = data.filter(s => s.session_id === latestSessionId);
+        isReference = false;
+      }
+
+      if (chosenSets.length > 0) {
+        // Ordena para pegar o MAIOR peso feito naquela sessão (e em caso de empate, maior repetição)
+        chosenSets.sort((a, b) => {
+          const wDiff = (parseFloat(b.weight_kg) || 0) - (parseFloat(a.weight_kg) || 0);
+          if (wDiff !== 0) return wDiff;
+          return (parseInt(b.reps, 10) || 0) - (parseInt(a.reps, 10) || 0);
+        });
+
+        const best = chosenSets[0];
         setLastLoads(prev => ({
           ...prev,
           [exercise.id]: {
-            weight: item.weight_kg,
-            reps: item.reps,
-            gymName: item.workout_sessions?.gyms?.name || 'Geral'
+            weight: best.weight_kg,
+            reps: best.reps,
+            gymName: best.workout_sessions?.gyms?.name || 'Outra academia',
+            isReference: isReference
           }
         }));
       }
@@ -866,14 +914,36 @@ export default function ActiveWorkout({
 
                   {!isMinimized && (
                     last ? (
-                      <p className="text-[11px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" />
-                        Última vez {isMachine ? `nesta academia (${currentGym?.name})` : 'geral'}:{' '}
-                        <strong>{last.weight} kg × {last.reps} reps</strong>
-                      </p>
+                      last.isReference ? (
+                        <p className="text-[11px] text-amber-300 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                          <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span>
+                            Sem registro aqui. Referência ({last.gymName}):{' '}
+                            <strong className="text-white">
+                              {isBodyweight && (!last.weight || parseFloat(last.weight) === 0)
+                                ? 'Peso Corporal'
+                                : `${last.weight} kg`}{' '}
+                              × {last.reps} reps
+                            </strong>
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                          <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span>
+                            Última vez {isMachine ? `nesta academia (${currentGym?.name || 'Atual'})` : 'geral'}:{' '}
+                            <strong className="text-white">
+                              {isBodyweight && (!last.weight || parseFloat(last.weight) === 0)
+                                ? 'Peso Corporal'
+                                : `${last.weight} kg`}{' '}
+                              × {last.reps} reps
+                            </strong>
+                          </span>
+                        </p>
+                      )
                     ) : (
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        Primeiro registro deste exercício {isMachine ? 'nesta academia' : ''}
+                        Primeiro registro deste exercício
                       </p>
                     )
                   )}

@@ -2,8 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { 
   Plus, Edit2, Trash2, Search, Dumbbell, History, 
-  Sparkles, Check, X, ChevronDown, ChevronUp, Award, Layers 
+  Sparkles, Check, X, ChevronDown, ChevronUp, Award, Layers, AlertCircle 
 } from 'lucide-react';
+
+const DEFAULT_MOCK_NAMES = [
+  'Supino Reto Barra',
+  'Crucifixo na Máquina',
+  'Puxada Alta (Polia)',
+  'Remada Curvada Halter',
+  'Leg Press 45',
+  'Agachamento Livre',
+  'Desenvolvimento Máquina',
+  'Elevação Lateral Halter',
+  'Tríceps Polia Corda',
+  'Rosca Direta Halter'
+];
 
 export default function ExerciseLibrary({ profile }) {
   const [exercises, setExercises] = useState([]);
@@ -18,6 +31,7 @@ export default function ExerciseLibrary({ profile }) {
   const [muscleGroup, setMuscleGroup] = useState('Peito');
   const [type, setType] = useState('free_weight');
   const [saving, setSaving] = useState(false);
+  const [cleaningDefaults, setCleaningDefaults] = useState(false);
 
   // Histórico expandido por exercício
   const [expandedExId, setExpandedExId] = useState(null);
@@ -43,6 +57,34 @@ export default function ExerciseLibrary({ profile }) {
       console.error('Erro ao buscar exercícios:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Remove apenas os exercícios que vieram de exemplo na criação do app
+  async function handleRemoveDefaultExercises() {
+    if (!confirm('Deseja apagar os 10 exercícios que vieram de exemplo e manter somente os que você criou?')) return;
+    setCleaningDefaults(true);
+    try {
+      const idsToDelete = exercises
+        .filter(e => DEFAULT_MOCK_NAMES.includes(e.name))
+        .map(e => e.id);
+
+      if (idsToDelete.length > 0) {
+        const { error } = await supabase
+          .from('exercises')
+          .delete()
+          .in('id', idsToDelete);
+
+        if (error) throw error;
+      }
+
+      await loadExercises();
+      alert('Exercícios de exemplo removidos com sucesso! Ficaram apenas os seus.');
+    } catch (err) {
+      console.error('Erro ao remover exemplos:', err);
+      alert('Erro ao remover exercícios de exemplo.');
+    } finally {
+      setCleaningDefaults(false);
     }
   }
 
@@ -104,8 +146,8 @@ export default function ExerciseLibrary({ profile }) {
     }
   }
 
-  async function handleDeleteExercise(id, name) {
-    if (!confirm(`Deseja realmente excluir o exercício "${name}"?`)) return;
+  async function handleDeleteExercise(id, exName) {
+    if (!confirm(`Deseja realmente excluir o exercício "${exName}"?`)) return;
     try {
       await supabase.from('exercises').delete().eq('id', id);
       setExercises(prev => prev.filter(e => e.id !== id));
@@ -154,6 +196,8 @@ export default function ExerciseLibrary({ profile }) {
     return matchesSearch && matchesMuscle;
   });
 
+  const hasMockExercises = exercises.some(e => DEFAULT_MOCK_NAMES.includes(e.name));
+
   return (
     <div className="pb-28 pt-2 px-4 max-w-lg mx-auto">
       {/* Header */}
@@ -170,6 +214,23 @@ export default function ExerciseLibrary({ profile }) {
           <Plus className="w-4 h-4" /> Novo Exercício
         </button>
       </div>
+
+      {/* Banner de limpeza de exercícios padrão (se existirem na conta) */}
+      {hasMockExercises && (
+        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-3 text-xs text-amber-200">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Há exercícios que vieram de exemplo na criação inicial.</span>
+          </div>
+          <button
+            onClick={handleRemoveDefaultExercises}
+            disabled={cleaningDefaults}
+            className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-[11px] shrink-0 active:scale-95 transition"
+          >
+            {cleaningDefaults ? 'Limpando...' : 'Apagar Exemplos'}
+          </button>
+        </div>
+      )}
 
       {/* Barra de Pesquisa */}
       <div className="relative mb-3">
@@ -323,7 +384,7 @@ export default function ExerciseLibrary({ profile }) {
             </h3>
             <p className="text-xs text-slate-400 mb-4">Defina o nome, músculo e forma de peso.</p>
 
-            <form onSubmit={handleSaveExerciseExercise} className="space-y-3">
+            <form onSubmit={handleSaveExercise} className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Nome do Exercício</label>
                 <input
@@ -374,8 +435,7 @@ export default function ExerciseLibrary({ profile }) {
                   Cancelar
                 </button>
                 <button
-                  type="button"
-                  onClick={handleSaveExercise}
+                  type="submit"
                   disabled={saving}
                   className="flex-1 py-2.5 text-xs font-bold text-slate-950 bg-emerald-500 rounded-xl hover:bg-emerald-400 transition"
                 >

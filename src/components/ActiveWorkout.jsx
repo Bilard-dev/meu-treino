@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import confetti from 'canvas-confetti';
 import { 
-  Play, Plus, Check, Trash2, Clock, Dumbbell, 
+  Play, Plus, Check, Trash2, Dumbbell, 
   ChevronDown, ChevronUp, Flame, Sparkles, AlertCircle, ArrowLeft,
   ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle, Edit2,
   Calendar, Trophy, Share2, Copy
@@ -103,7 +103,7 @@ export default function ActiveWorkout({
         .select(`
           id, name,
           workout_template_exercises (
-            id, exercise_id, order_index, default_sets, default_rest_seconds,
+            id, exercise_id, order_index, default_sets,
             exercises (id, name, muscle_group, type)
           )
         `)
@@ -199,7 +199,6 @@ export default function ActiveWorkout({
             set_number: i,
             weight_kg: isBodyweight ? '0' : '',
             reps: '',
-            rest_seconds: item.default_rest_seconds || 60,
             completed: false
           });
         }
@@ -244,9 +243,9 @@ export default function ActiveWorkout({
       {
         exercise: exercise,
         sets: [
-          { set_number: 1, weight_kg: isBodyweight ? '0' : '', reps: '', rest_seconds: 60, completed: false },
-          { set_number: 2, weight_kg: isBodyweight ? '0' : '', reps: '', rest_seconds: 60, completed: false },
-          { set_number: 3, weight_kg: isBodyweight ? '0' : '', reps: '', rest_seconds: 60, completed: false },
+          { set_number: 1, weight_kg: isBodyweight ? '0' : '', reps: '', completed: false },
+          { set_number: 2, weight_kg: isBodyweight ? '0' : '', reps: '', completed: false },
+          { set_number: 3, weight_kg: isBodyweight ? '0' : '', reps: '', completed: false },
         ],
         isMinimized: false
       }
@@ -348,17 +347,14 @@ export default function ActiveWorkout({
       const isBodyweight = ex?.type === 'bodyweight';
       const currentSet = { ...updated[exIndex].sets[setIndex], [field]: value };
 
-      // Se for alteração direta de 'completed'
       if (field === 'completed') {
         currentSet.completed = value;
       } 
-      // Auto-marca como "Feito" quando digitar repetições
       else if (field === 'reps' && value && String(value).trim() !== '') {
         if (isBodyweight || currentSet.weight_kg !== '') {
           currentSet.completed = true;
         }
       }
-      // Auto-marca como "Feito" quando preencher peso (se reps já preenchidas)
       else if (field === 'weight_kg' && value && String(value).trim() !== '' && currentSet.reps !== '') {
         currentSet.completed = true;
       }
@@ -380,7 +376,6 @@ export default function ActiveWorkout({
         set_number: currentSets.length + 1,
         weight_kg: lastSet ? lastSet.weight_kg : (isBodyweight ? '0' : ''),
         reps: lastSet ? lastSet.reps : '',
-        rest_seconds: lastSet ? lastSet.rest_seconds : 60,
         completed: false
       });
       return updated;
@@ -411,7 +406,7 @@ export default function ActiveWorkout({
     }
   }
 
-  // Gerar relatório em texto do treino atual
+  // Gerar relatório em texto do treino atual (sem descanso)
   function buildReportText(sessionName, gymName, exercises) {
     const dateStr = new Date().toLocaleDateString('pt-BR');
     let text = `🏋️ RELATÓRIO DE TREINO - Meu Treino\n`;
@@ -425,7 +420,7 @@ export default function ActiveWorkout({
       item.sets.forEach(s => {
         if (s.completed || s.reps) {
           const w = ex.type === 'bodyweight' && (!s.weight_kg || s.weight_kg === '0') ? 'Peso Corporal' : `${s.weight_kg}kg`;
-          text += `   - Série ${s.set_number}: ${w} x ${s.reps} reps (${s.rest_seconds || 60}s desc)\n`;
+          text += `   - Série ${s.set_number}: ${w} x ${s.reps} reps\n`;
         }
       });
       text += `\n`;
@@ -469,7 +464,6 @@ export default function ActiveWorkout({
               set_number: s.set_number,
               weight_kg: parseFloat(s.weight_kg) || 0,
               reps: parseInt(s.reps, 10) || 0,
-              rest_seconds: parseInt(s.rest_seconds, 10) || 60,
             });
           }
         });
@@ -509,7 +503,6 @@ export default function ActiveWorkout({
     }
   }
 
-  // Contagem de séries preenchidas para o resumo da confirmação
   const totalSetsCount = sessionExercises.reduce((acc, curr) => acc + curr.sets.length, 0);
   const completedSetsCount = sessionExercises.reduce((acc, curr) => {
     return acc + curr.sets.filter(s => s.completed || (s.weight_kg && s.reps)).length;
@@ -525,18 +518,14 @@ export default function ActiveWorkout({
     const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
     const totalDays = lastDayOfMonth.getDate();
 
-    // Dia da semana do 1º dia (0 = domingo, 1 = seg...)
     let startDayOfWeek = firstDayOfMonth.getDay();
-    // Ajusta para semana começando na segunda (0 = segunda ... 6 = domingo)
     startDayOfWeek = (startDayOfWeek + 6) % 7;
 
-    // Mapeamento de treinos por dia
     const workoutsByDay = {};
     pastSessions.forEach(s => {
       const d = new Date(s.date);
       if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
         const dayNum = d.getDate();
-        // Extrai a letra do treino (ex: "Treino A" -> "A", "Treino B" -> "B", "Livre" -> "L")
         let letter = 'T';
         if (s.name.includes('Treino ')) {
           const part = s.name.split('Treino ')[1];
@@ -551,12 +540,10 @@ export default function ActiveWorkout({
     });
 
     const daysCells = [];
-    // Espaços vazios antes do 1º dia
     for (let i = 0; i < startDayOfWeek; i++) {
       daysCells.push(<div key={`empty-${i}`} className="h-9"></div>);
     }
 
-    // Dias do mês
     for (let day = 1; day <= totalDays; day++) {
       const workoutInfo = workoutsByDay[day];
       const isToday = day === today.getDate();
@@ -598,7 +585,7 @@ export default function ActiveWorkout({
 
     return (
       <div className="pb-24 pt-2 px-4 max-w-lg mx-auto">
-        {/* Modal de Relatório Pronto (logo após finalizar um treino) */}
+        {/* Modal de Relatório Pronto */}
         {finishedReportText && (
           <div className="mb-5 bg-slate-900 border border-emerald-500/40 rounded-3xl p-5 shadow-2xl animate-in fade-in">
             <div className="flex items-center justify-between mb-2">
@@ -624,7 +611,7 @@ export default function ActiveWorkout({
           </div>
         )}
 
-        {/* PLACAR DE FREQUÊNCIA: Treinos no Mês & Treinos no Ano */}
+        {/* PLACAR DE FREQUÊNCIA */}
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-lg flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
@@ -653,7 +640,7 @@ export default function ActiveWorkout({
           </div>
         </div>
 
-        {/* MINI CALENDÁRIO DA TELA INICIAL */}
+        {/* MINI CALENDÁRIO */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 mb-6 shadow-xl">
           <div className="flex items-center justify-between mb-3 px-1">
             <span className="text-xs font-bold text-slate-200 capitalize flex items-center gap-1.5">
@@ -664,7 +651,6 @@ export default function ActiveWorkout({
             </span>
           </div>
 
-          {/* Dias da Semana (Seg a Dom) */}
           <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
             <span>Seg</span>
             <span>Ter</span>
@@ -675,12 +661,10 @@ export default function ActiveWorkout({
             <span>Dom</span>
           </div>
 
-          {/* Grade de Dias */}
           <div className="grid grid-cols-7 gap-1">
             {renderCalendarGrid()}
           </div>
 
-          {/* Tooltip/Aviso do Dia Clicado no Calendário */}
           {selectedCalendarDayInfo && (
             <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-300 animate-in fade-in">
               <span className="truncate">
@@ -751,7 +735,6 @@ export default function ActiveWorkout({
                     </button>
                   </div>
 
-                  {/* Prévia dos exercícios */}
                   {count > 0 && (
                     <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-800/50">
                       {tpl.workout_template_exercises.slice(0, 4).map(e => (
@@ -833,7 +816,7 @@ export default function ActiveWorkout({
                   : 'border-slate-800 p-4'
               }`}
             >
-              {/* Header do Exercício com NUMERADOR e BOTÃO EDITAR */}
+              {/* Header do Exercício */}
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -906,45 +889,40 @@ export default function ActiveWorkout({
                 </div>
               </div>
 
-              {/* CORPO EXPANDIDO */}
+              {/* CORPO EXPANDIDO (Tabela com CAMPOS LARGOS para Kg e Reps, sem descanso) */}
               {!isMinimized && (
                 <div className="space-y-1.5 mt-3 pt-2 border-t border-slate-800/60">
                   <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
                     <div className="col-span-2 text-center">Série</div>
-                    <div className="col-span-3 text-center">{isBodyweight ? '+Kg (opt)' : 'Kg'}</div>
-                    <div className="col-span-3 text-center">Reps</div>
-                    <div className="col-span-2 text-center">Desc.</div>
+                    <div className="col-span-4 text-center">{isBodyweight ? '+Kg (opcional)' : 'Carga (Kg)'}</div>
+                    <div className="col-span-4 text-center">Repetições</div>
                     <div className="col-span-2 text-center">Feito</div>
                   </div>
 
                   {item.sets.map((set, setIdx) => (
                     <React.Fragment key={setIdx}>
                       {set.completed ? (
-                        <div className="grid grid-cols-12 gap-2 items-center py-1.5 px-2.5 rounded-xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
+                        <div className="grid grid-cols-12 gap-2 items-center py-2 px-3 rounded-xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
                           <div className="col-span-2 text-center font-bold text-xs text-emerald-400/80 flex items-center justify-center gap-1">
                             #{set.set_number}
                           </div>
 
-                          <div className="col-span-3 text-center">
-                            <span className="text-xs font-black text-white">
-                              {isBodyweight && (set.weight_kg === '0' || !set.weight_kg) ? 'Corpo' : `${set.weight_kg}kg`}
+                          <div className="col-span-4 text-center">
+                            <span className="text-sm font-black text-white">
+                              {isBodyweight && (set.weight_kg === '0' || !set.weight_kg) ? 'Corpo' : `${set.weight_kg} kg`}
                             </span>
                           </div>
 
-                          <div className="col-span-3 text-center">
-                            <span className="text-xs font-black text-white">{set.reps}</span>
-                            <span className="text-[10px] text-slate-400 font-normal ml-0.5">reps</span>
-                          </div>
-
-                          <div className="col-span-2 text-center text-[10px] text-slate-400">
-                            {set.rest_seconds || 60}s
+                          <div className="col-span-4 text-center">
+                            <span className="text-sm font-black text-white">{set.reps}</span>
+                            <span className="text-[11px] text-slate-400 font-normal ml-1">reps</span>
                           </div>
 
                           <div className="col-span-2 flex items-center justify-center">
                             <button
                               type="button"
                               onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', false)}
-                              className="w-7 h-7 rounded-lg bg-emerald-500 text-slate-950 flex items-center justify-center shadow-sm shadow-emerald-500/30 active:scale-90 transition"
+                              className="w-8 h-8 rounded-lg bg-emerald-500 text-slate-950 flex items-center justify-center shadow-sm shadow-emerald-500/30 active:scale-90 transition"
                               title="Toque para destravar e editar"
                             >
                               <Check className="w-4 h-4 stroke-[3]" />
@@ -952,41 +930,30 @@ export default function ActiveWorkout({
                           </div>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-12 gap-2 items-center p-1.5 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
-                          <div className="col-span-2 text-center font-bold text-xs text-slate-400">
+                        <div className="grid grid-cols-12 gap-2 items-center p-2 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
+                          <div className="col-span-2 text-center font-bold text-sm text-slate-400">
                             #{set.set_number}
                           </div>
 
-                          <div className="col-span-3">
+                          <div className="col-span-4">
                             <input
                               type="number"
                               inputMode="decimal"
                               placeholder={isBodyweight ? "0" : "0"}
                               value={set.weight_kg}
                               onChange={(e) => handleUpdateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
-                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
+                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2.5 text-base font-bold text-white focus:outline-none focus:border-emerald-500"
                             />
                           </div>
 
-                          <div className="col-span-3">
+                          <div className="col-span-4">
                             <input
                               type="number"
                               inputMode="numeric"
                               placeholder="0"
                               value={set.reps}
                               onChange={(e) => handleUpdateSet(exIdx, setIdx, 'reps', e.target.value)}
-                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
-                            />
-                          </div>
-
-                          <div className="col-span-2">
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              placeholder="60"
-                              value={set.rest_seconds}
-                              onChange={(e) => handleUpdateSet(exIdx, setIdx, 'rest_seconds', e.target.value)}
-                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2.5 text-base font-bold text-white focus:outline-none focus:border-emerald-500"
                             />
                           </div>
 
@@ -994,7 +961,7 @@ export default function ActiveWorkout({
                             <button
                               type="button"
                               onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', true)}
-                              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition active:scale-90"
+                              className="w-10 h-10 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition active:scale-90"
                               title="Marcar série como feita"
                             >
                               <Check className="w-5 h-5 stroke-[2.5]" />

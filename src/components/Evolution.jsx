@@ -80,7 +80,7 @@ export default function Evolution({ profile, gyms }) {
         const { data } = await supabase
           .from('workout_sets')
           .select(`
-            id, set_number, weight_kg, reps, rest_seconds,
+            id, set_number, weight_kg, reps,
             exercises (id, name, muscle_group, type)
           `)
           .eq('session_id', sessionId)
@@ -128,7 +128,7 @@ export default function Evolution({ profile, gyms }) {
       text += `${i}. ${exName} (${type})\n`;
       sList.forEach(st => {
         const weightStr = sList[0]?.exercises?.type === 'bodyweight' && (!st.weight_kg || parseFloat(st.weight_kg) === 0) ? 'Peso Corporal' : `${st.weight_kg}kg`;
-        text += `   - Série ${st.set_number}: ${weightStr} x ${st.reps} reps (${st.rest_seconds || 60}s desc)\n`;
+        text += `   - Série ${st.set_number}: ${weightStr} x ${st.reps} reps\n`;
       });
       text += `\n`;
       i++;
@@ -268,14 +268,13 @@ export default function Evolution({ profile, gyms }) {
                       </div>
                     </div>
 
-                    {/* Detalhes Expandidos (Séries Feitas + Botão de Relatório) */}
+                    {/* Detalhes Expandidos */}
                     {isExpanded && (
                       <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-3">
                         {sets.length === 0 ? (
                           <p className="text-xs text-slate-500 text-center py-2">Carregando séries...</p>
                         ) : (
                           <>
-                            {/* Botão Copiar Relatório */}
                             <div className="flex justify-end">
                               <button
                                 type="button"
@@ -298,7 +297,6 @@ export default function Evolution({ profile, gyms }) {
                               </button>
                             </div>
 
-                            {/* Agrupamento por exercício */}
                             {Object.entries(
                               sets.reduce((acc, curr) => {
                                 const exName = curr.exercises?.name || 'Exercício';

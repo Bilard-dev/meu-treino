@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Plus, Trash2, Edit2, ClipboardList, Dumbbell, Clock, Check, X } from 'lucide-react';
+import { Plus, Trash2, Edit2, ClipboardList, Dumbbell, Check, X } from 'lucide-react';
 
 export default function WorkoutTemplates({ profile }) {
   const [templates, setTemplates] = useState([]);
@@ -11,13 +11,13 @@ export default function WorkoutTemplates({ profile }) {
   const [showModal, setShowModal] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [templateExercises, setTemplateExercises] = useState([]); // [{ exercise_id, default_sets, default_rest_seconds }]
+  const [templateExercises, setTemplateExercises] = useState([]); // [{ exercise_id, default_sets }]
 
   // Criar exercício novo rápido no modal
   const [showNewExerciseInput, setShowNewExerciseInput] = useState(false);
   const [newExName, setNewExName] = useState('');
   const [newExMuscle, setNewExMuscle] = useState('Peito');
-  const [newExType, setNewExType] = useState('machine');
+  const [newExType, setNewExType] = useState('free_weight');
 
   useEffect(() => {
     loadData();
@@ -26,13 +26,12 @@ export default function WorkoutTemplates({ profile }) {
   async function loadData() {
     setLoading(true);
     try {
-      // Busca fichas
       const { data: tpls } = await supabase
         .from('workout_templates')
         .select(`
           id, name, created_at,
           workout_template_exercises (
-            id, exercise_id, order_index, default_sets, default_rest_seconds,
+            id, exercise_id, order_index, default_sets,
             exercises (id, name, muscle_group, type)
           )
         `)
@@ -41,7 +40,6 @@ export default function WorkoutTemplates({ profile }) {
 
       setTemplates(tpls || []);
 
-      // Busca todos os exercícios cadastrados
       const { data: exs } = await supabase
         .from('exercises')
         .select('*')
@@ -71,7 +69,6 @@ export default function WorkoutTemplates({ profile }) {
       .map(item => ({
         exercise_id: item.exercise_id,
         default_sets: item.default_sets || 4,
-        default_rest_seconds: item.default_rest_seconds || 60
       }));
     setTemplateExercises(mapped);
     setShowModal(true);
@@ -91,7 +88,7 @@ export default function WorkoutTemplates({ profile }) {
     if (!exerciseId) return;
     setTemplateExercises(prev => [
       ...prev,
-      { exercise_id: exerciseId, default_sets: 4, default_rest_seconds: 60 }
+      { exercise_id: exerciseId, default_sets: 4 }
     ]);
   }
 
@@ -134,19 +131,16 @@ export default function WorkoutTemplates({ profile }) {
       let tplId = selectedTemplate?.id;
 
       if (selectedTemplate) {
-        // Atualiza nome
         await supabase
           .from('workout_templates')
           .update({ name: templateName.trim() })
           .eq('id', tplId);
 
-        // Deleta exercícios antigos da ficha para re-inserir atualizados
         await supabase
           .from('workout_template_exercises')
           .delete()
           .eq('template_id', tplId);
       } else {
-        // Cria nova ficha
         const { data: newTpl, error } = await supabase
           .from('workout_templates')
           .insert([{ profile_id: profile.id, name: templateName.trim() }])
@@ -156,14 +150,12 @@ export default function WorkoutTemplates({ profile }) {
         tplId = newTpl.id;
       }
 
-      // Insere os exercícios configurados
       if (templateExercises.length > 0) {
         const rows = templateExercises.map((item, index) => ({
           template_id: tplId,
           exercise_id: item.exercise_id,
           order_index: index,
           default_sets: parseInt(item.default_sets, 10) || 4,
-          default_rest_seconds: parseInt(item.default_rest_seconds, 10) || 60
         }));
 
         await supabase.from('workout_template_exercises').insert(rows);
@@ -252,7 +244,7 @@ export default function WorkoutTemplates({ profile }) {
                           </span>
                         </div>
                         <span className="text-slate-400 font-mono text-[11px] shrink-0 ml-2">
-                          {item.default_sets} séries • {item.default_rest_seconds}s
+                          {item.default_sets} séries
                         </span>
                       </div>
                     );
@@ -323,23 +315,6 @@ export default function WorkoutTemplates({ profile }) {
                                 setTemplateExercises(prev => {
                                   const copy = [...prev];
                                   copy[idx].default_sets = val;
-                                  return copy;
-                                });
-                              }}
-                              className="w-12 text-center bg-slate-900 border border-slate-700 rounded-lg py-1 text-xs text-white"
-                            />
-                          </div>
-
-                          <div className="text-center">
-                            <span className="block text-[9px] text-slate-400">Desc. (s)</span>
-                            <input
-                              type="number"
-                              value={item.default_rest_seconds}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setTemplateExercises(prev => {
-                                  const copy = [...prev];
-                                  copy[idx].default_rest_seconds = val;
                                   return copy;
                                 });
                               }}
@@ -415,8 +390,8 @@ export default function WorkoutTemplates({ profile }) {
                           onChange={e => setNewExType(e.target.value)}
                           className="bg-slate-900 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white"
                         >
-                          <option value="machine">⚙️ Máquina</option>
                           <option value="free_weight">🏋️ Peso Livre</option>
+                          <option value="machine">⚙️ Máquina</option>
                           <option value="bodyweight">🤸 Peso Corporal</option>
                         </select>
                       </div>

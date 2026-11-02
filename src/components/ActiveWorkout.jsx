@@ -3,7 +3,8 @@ import { supabase } from '../supabaseClient';
 import confetti from 'canvas-confetti';
 import { 
   Play, Plus, Check, Trash2, Clock, Dumbbell, 
-  ChevronDown, Flame, Sparkles, AlertCircle, ArrowLeft 
+  ChevronDown, Flame, Sparkles, AlertCircle, ArrowLeft,
+  ShieldCheck, CheckCircle2, X
 } from 'lucide-react';
 
 export default function ActiveWorkout({ 
@@ -22,6 +23,11 @@ export default function ActiveWorkout({
   const [sessionExercises, setSessionExercises] = useState([]);
   const [lastLoads, setLastLoads] = useState({}); // { [exerciseId]: { weight, reps, gymName, date } }
   const [saving, setSaving] = useState(false);
+  const [showFinishConfirmModal, setShowFinishConfirmModal] = useState(false);
+  const [restoredNotice, setRestoredNotice] = useState(false);
+
+  // Chave única para salvar o rascunho no celular (Anti-Perda)
+  const DRAFT_STORAGE_KEY = `meu_treino_active_draft_${profile.id}`;
 
   // Modais de suporte
   const [showAddExerciseModal, setShowAddExerciseModal] = useState(false);
@@ -32,6 +38,46 @@ export default function ActiveWorkout({
   useEffect(() => {
     loadInitialData();
   }, [profile.id, currentGym?.id]);
+
+  // Recupera treino em andamento se o app fechou (Anti-Perda)
+  useEffect(() => {
+    try {
+      const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        if (parsed.activeSession && parsed.sessionExercises && parsed.sessionExercises.length > 0) {
+          setActiveSession(parsed.activeSession);
+          setSessionExercises(parsed.sessionExercises);
+          setRestoredNotice(true);
+          setTimeout(() => setRestoredNotice(false), 5000);
+
+          // Recarrega cargas anteriores dos exercícios restaurados
+          parsed.sessionExercises.forEach(item => {
+            if (item.exercise) fetchLastLoad(item.exercise);
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao restaurar rascunho do treino:', e);
+    }
+  }, [profile.id]);
+
+  // Salva automaticamente a cada alteração em tempo real (Anti-Perda)
+  useEffect(() => {
+    try {
+      if (activeSession) {
+        localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+          activeSession,
+          sessionExercises,
+          savedAt: new Date().toISOString()
+        }));
+      } else {
+        localStorage.removeItem(DRAFT_STORAGE_KEY);
+      }
+    } catch (e) {
+      console.error('Erro ao salvar rascunho automático:', e);
+    }
+  }, [activeSession, sessionExercises]);
 
   async function loadInitialData() {
     setLoading(true);
@@ -123,11 +169,13 @@ export default function ActiveWorkout({
         };
       });
 
-    setActiveSession({
+    const sessionObj = {
       name: tpl.name,
       template_id: tpl.id,
-      startedAt: new Date(),
-    });
+      startedAt: new Date().toISOString(),
+    };
+
+    setActiveSession(sessionObj);
     setSessionExercises(exercisesList);
 
     // Carrega a última carga de cada exercício
@@ -141,7 +189,7 @@ export default function ActiveWorkout({
     setActiveSession({
       name: 'Treino Livre',
       template_id: null,
-      startedAt: new Date(),
+      startedAt: new Date().toISOString(),
     });
     setSessionExercises([]);
   }
@@ -231,8 +279,17 @@ export default function ActiveWorkout({
     setSessionExercises(prev => prev.filter((_, idx) => idx !== exIndex));
   }
 
+  // Cancelar treino em andamento
+  function handleCancelWorkout() {
+    if (confirm('Deseja realmente cancelar este treino? Todas as anotações deste treino serão apagadas.')) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      setActiveSession(null);
+      setSessionExercises([]);
+    }
+  }
+
   // Finalizar e Salvar Treino
-  async function handleFinishWorkout() {
+  async function handleConfirmFinishWorkout() {
     if (sessionExercises.length === 0) {
       alert('Adicione pelo menos um exercício ao treino.');
       return;
@@ -287,8 +344,12 @@ export default function ActiveWorkout({
         origin: { y: 0.6 }
       });
 
+      // Limpa o rascunho salvo no celular
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
       setActiveSession(null);
       setSessionExercises([]);
+      setShowFinishConfirmModal(false);
+
       if (onWorkoutFinished) onWorkoutFinished();
     } catch (err) {
       console.error('Erro ao finalizar treino:', err);
@@ -297,6 +358,12 @@ export default function ActiveWorkout({
       setSaving(false);
     }
   }
+
+  // Contagem de séries preenchidas para o resumo da confirmação
+  const totalSetsCount = sessionExercises.reduce((acc, curr) => acc + curr.sets.length, 0);
+  const completedSetsCount = sessionExercises.reduce((acc, curr) => {
+    return acc + curr.sets.filter(s => s.completed || (s.weight_kg && s.reps)).length;
+  }, 0);
 
   /* ------------------- RENDER: TELA DE ESCOLHA DE TREINO ------------------- */
   if (!activeSession) {
@@ -384,36 +451,51 @@ export default function ActiveWorkout({
 
   /* ------------------- RENDER: TREINO EM ANDAMENTO ------------------- */
   return (
-    <div className="pb-32 pt-2 px-3 max-w-lg mx-auto">
-      {/* Top Header do Treino Ativo */}
-      <div className="sticky top-14 z-30 bg-slate-950/95 backdrop-blur-md py-2 border-b border-slate-800/80 flex items-center justify-between mb-4">
+    <div className="pb-28 pt-2 px-3 max-w-lg mx-auto">
+      {/* Alerta Visual de Recuperação Automática */}
+      {restoredNotice && (
+        <div className="mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center gap-2 text-xs text-emerald-300 animate-in fade-in">
+          <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span><strong>Treino recuperado!</strong> Continuando exatamente de onde você parou.</span>
+        </div>
+      )}
+
+      {/* Top Header do Treino Ativo: Limpo, Seguro e com Botão Compacto */}
+      <div className="sticky top-14 z-30 bg-slate-950/95 backdrop-blur-md py-2.5 border-b border-slate-800/80 flex items-center justify-between mb-4">
         <div>
-          <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+          <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wider">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            TREINO EM ANDAMENTO
+            TREINANDO AGORA
           </span>
-          <h2 className="text-lg font-black text-white">{activeSession.name}</h2>
-          <span className="text-xs text-slate-400">Na {currentGym?.name || 'Academia'}</span>
+          <h2 className="text-base font-black text-white leading-tight">{activeSession.name}</h2>
+          <span className="text-[11px] text-slate-400 leading-tight block">{currentGym?.name || 'Academia'}</span>
         </div>
 
-        <button
-          onClick={() => {
-            if (confirm('Deseja realmente cancelar este treino? Os dados não serão salvos.')) {
-              setActiveSession(null);
-            }
-          }}
-          className="text-xs text-rose-400 hover:text-rose-300 px-2.5 py-1.5 rounded-xl border border-rose-500/20 bg-rose-500/5 active:scale-95 transition"
-        >
-          Cancelar
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Botão Cancelar Discreto */}
+          <button
+            onClick={handleCancelWorkout}
+            className="text-[11px] text-slate-500 hover:text-rose-400 px-2 py-1.5 rounded-xl border border-transparent hover:border-slate-800 transition"
+          >
+            Cancelar
+          </button>
+
+          {/* Botão Finalizar Seguro no Topo */}
+          <button
+            onClick={() => setShowFinishConfirmModal(true)}
+            className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1 shadow-md shadow-emerald-500/20 active:scale-95 transition"
+          >
+            <Check className="w-3.5 h-3.5 stroke-[3]" /> Finalizar
+          </button>
+        </div>
       </div>
 
       {/* Lista de Exercícios do Treino */}
       <div className="space-y-4">
         {sessionExercises.map((item, exIdx) => {
           const ex = item.exercise;
-          const last = lastLoads[ex.id];
-          const isMachine = ex.type === 'machine';
+          const last = lastLoads[ex?.id];
+          const isMachine = ex?.type === 'machine';
 
           return (
             <div
@@ -425,7 +507,7 @@ export default function ActiveWorkout({
                 <div>
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      {ex.muscle_group}
+                      {ex?.muscle_group}
                     </span>
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                       isMachine 
@@ -435,7 +517,7 @@ export default function ActiveWorkout({
                       {isMachine ? '⚙️ Máquina / Polia' : '🏋️ Peso Livre'}
                     </span>
                   </div>
-                  <h3 className="font-bold text-white text-base">{ex.name}</h3>
+                  <h3 className="font-bold text-white text-base">{ex?.name}</h3>
 
                   {/* Inteligência de Carga Anterior */}
                   {last ? (
@@ -558,27 +640,63 @@ export default function ActiveWorkout({
           <Plus className="w-4 h-4 text-emerald-400" />
           Adicionar Exercício ao Treino
         </button>
-      </div>
 
-      {/* Barra Fixa Inferior: Finalizar Treino */}
-      <div className="fixed bottom-16 left-0 right-0 p-3 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent z-30">
-        <div className="max-w-lg mx-auto">
+        {/* Botão Secundário de Finalizar no Final da Página (com espaçamento seguro) */}
+        <div className="pt-4 pb-2">
           <button
-            onClick={handleFinishWorkout}
-            disabled={saving}
-            className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm rounded-2xl shadow-xl shadow-emerald-500/30 active:scale-95 transition flex items-center justify-center gap-2"
+            onClick={() => setShowFinishConfirmModal(true)}
+            className="w-full py-3 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/40 rounded-2xl text-xs font-bold text-emerald-400 flex items-center justify-center gap-2 transition active:scale-95 shadow-lg"
           >
-            <Check className="w-5 h-5 stroke-[3]" />
-            {saving ? 'Salvando Treino...' : 'FINALIZAR TREINO'}
+            <CheckCircle2 className="w-4 h-4" /> Finalizar Treino do Dia
           </button>
         </div>
       </div>
+
+      {/* Modal de Confirmação para Finalizar o Treino (Anti-Clique Acidental) */}
+      {showFinishConfirmModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-4">
+              <Check className="w-7 h-7 stroke-[3]" />
+            </div>
+
+            <h3 className="text-lg font-bold text-white mb-1">Finalizar este treino?</h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Você completou <strong className="text-white">{completedSetsCount}</strong> de <strong className="text-slate-300">{totalSetsCount}</strong> séries anotadas.
+            </p>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleConfirmFinishWorkout}
+                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black rounded-2xl text-xs shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center justify-center gap-2"
+              >
+                {saving ? 'Salvando no banco...' : 'Sim, Salvar Treino'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowFinishConfirmModal(false)}
+                className="w-full py-2.5 text-xs text-slate-400 hover:text-white rounded-xl transition"
+              >
+                Voltar e Continuar Treinando
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Escolher ou Criar Exercício Avulso */}
       {showAddExerciseModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[85vh] flex flex-col">
-            <h3 className="text-base font-bold text-white mb-2">Adicionar Exercício</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-bold text-white">Adicionar Exercício</h3>
+              <button onClick={() => setShowAddExerciseModal(false)} className="p-1.5 text-slate-400 hover:text-white rounded-xl">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             <p className="text-xs text-slate-400 mb-4">Escolha um existente ou cadastre um novo na hora.</p>
 
             {/* Criar Rápido */}

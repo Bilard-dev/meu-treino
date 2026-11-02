@@ -4,7 +4,8 @@ import confetti from 'canvas-confetti';
 import { 
   Play, Plus, Check, Trash2, Clock, Dumbbell, 
   ChevronDown, ChevronUp, Flame, Sparkles, AlertCircle, ArrowLeft,
-  ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle, Edit2
+  ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle, Edit2,
+  Calendar, Trophy, Share2, Copy
 } from 'lucide-react';
 
 export default function ActiveWorkout({ 
@@ -18,6 +19,12 @@ export default function ActiveWorkout({
   const [allExercises, setAllExercises] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Estatísticas e Calendário da Tela Inicial
+  const [pastSessions, setPastSessions] = useState([]);
+  const [monthCount, setMonthCount] = useState(0);
+  const [yearCount, setYearCount] = useState(0);
+  const [selectedCalendarDayInfo, setSelectedCalendarDayInfo] = useState(null);
+
   // Estado do treino ativo
   const [activeSession, setActiveSession] = useState(null);
   const [sessionExercises, setSessionExercises] = useState([]);
@@ -25,6 +32,7 @@ export default function ActiveWorkout({
   const [saving, setSaving] = useState(false);
   const [showFinishConfirmModal, setShowFinishConfirmModal] = useState(false);
   const [restoredNotice, setRestoredNotice] = useState(false);
+  const [finishedReportText, setFinishedReportText] = useState(null);
 
   // Chave única para salvar o rascunho no celular (Anti-Perda)
   const DRAFT_STORAGE_KEY = `meu_treino_active_draft_${profile.id}`;
@@ -112,6 +120,29 @@ export default function ActiveWorkout({
         .order('name', { ascending: true });
 
       setAllExercises(exs || []);
+
+      // 3. Carregar sessões passadas para o calendário e contadores de frequência
+      const { data: sessions } = await supabase
+        .from('workout_sessions')
+        .select('id, name, date')
+        .eq('profile_id', profile.id)
+        .order('date', { ascending: false });
+
+      if (sessions) {
+        setPastSessions(sessions);
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+
+        const countYear = sessions.filter(s => new Date(s.date).getFullYear() === currentYear).length;
+        const countMonth = sessions.filter(s => {
+          const d = new Date(s.date);
+          return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+        }).length;
+
+        setYearCount(countYear);
+        setMonthCount(countMonth);
+      }
     } catch (err) {
       console.error('Erro ao carregar dados do treino:', err);
     } finally {
@@ -323,7 +354,6 @@ export default function ActiveWorkout({
       } 
       // Auto-marca como "Feito" quando digitar repetições
       else if (field === 'reps' && value && String(value).trim() !== '') {
-        // Se for peso corporal, não exige peso obrigatoriamente
         if (isBodyweight || currentSet.weight_kg !== '') {
           currentSet.completed = true;
         }
@@ -362,7 +392,6 @@ export default function ActiveWorkout({
     setSessionExercises(prev => {
       const updated = [...prev];
       updated[exIndex].sets.splice(setIndex, 1);
-      // Reordena numeração
       updated[exIndex].sets.forEach((s, idx) => s.set_number = idx + 1);
       return updated;
     });
@@ -380,6 +409,29 @@ export default function ActiveWorkout({
       setActiveSession(null);
       setSessionExercises([]);
     }
+  }
+
+  // Gerar relatório em texto do treino atual
+  function buildReportText(sessionName, gymName, exercises) {
+    const dateStr = new Date().toLocaleDateString('pt-BR');
+    let text = `🏋️ RELATÓRIO DE TREINO - Meu Treino\n`;
+    text += `📅 Data: ${dateStr} • Academia: ${gymName || 'Academia'}\n`;
+    text += `💪 Treino: ${sessionName}\n\n`;
+
+    exercises.forEach((item, idx) => {
+      const ex = item.exercise;
+      const typeLabel = ex.type === 'machine' ? 'Máquina' : ex.type === 'bodyweight' ? 'Corporal' : 'Livre';
+      text += `${idx + 1}. ${ex.name} (${ex.muscle_group} • ${typeLabel})\n`;
+      item.sets.forEach(s => {
+        if (s.completed || s.reps) {
+          const w = ex.type === 'bodyweight' && (!s.weight_kg || s.weight_kg === '0') ? 'Peso Corporal' : `${s.weight_kg}kg`;
+          text += `   - Série ${s.set_number}: ${w} x ${s.reps} reps (${s.rest_seconds || 60}s desc)\n`;
+        }
+      });
+      text += `\n`;
+    });
+
+    return text;
   }
 
   // Finalizar e Salvar Treino
@@ -410,7 +462,6 @@ export default function ActiveWorkout({
       const setsToInsert = [];
       sessionExercises.forEach(item => {
         item.sets.forEach(s => {
-          // Salva séries concluídas ou que tenham reps informadas
           if (s.completed || s.reps) {
             setsToInsert.push({
               session_id: sessionData.id,
@@ -438,13 +489,18 @@ export default function ActiveWorkout({
         origin: { y: 0.6 }
       });
 
+      // Gera o texto do relatório para cópia imediata
+      const report = buildReportText(activeSession.name, currentGym?.name, sessionExercises);
+      setFinishedReportText(report);
+
       // Limpa o rascunho salvo no celular
       localStorage.removeItem(DRAFT_STORAGE_KEY);
       setActiveSession(null);
       setSessionExercises([]);
       setShowFinishConfirmModal(false);
 
-      if (onWorkoutFinished) onWorkoutFinished();
+      // Recarrega estatísticas
+      loadInitialData();
     } catch (err) {
       console.error('Erro ao finalizar treino:', err);
       alert('Erro ao salvar treino. Tente novamente.');
@@ -459,10 +515,184 @@ export default function ActiveWorkout({
     return acc + curr.sets.filter(s => s.completed || (s.weight_kg && s.reps)).length;
   }, 0);
 
-  /* ------------------- RENDER: TELA DE ESCOLHA DE TREINO ------------------- */
+  // GERAÇÃO DO CALENDÁRIO DO MÊS ATUAL
+  function renderCalendarGrid() {
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+
+    const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
+    const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
+    const totalDays = lastDayOfMonth.getDate();
+
+    // Dia da semana do 1º dia (0 = domingo, 1 = seg...)
+    let startDayOfWeek = firstDayOfMonth.getDay();
+    // Ajusta para semana começando na segunda (0 = segunda ... 6 = domingo)
+    startDayOfWeek = (startDayOfWeek + 6) % 7;
+
+    // Mapeamento de treinos por dia
+    const workoutsByDay = {};
+    pastSessions.forEach(s => {
+      const d = new Date(s.date);
+      if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
+        const dayNum = d.getDate();
+        // Extrai a letra do treino (ex: "Treino A" -> "A", "Treino B" -> "B", "Livre" -> "L")
+        let letter = 'T';
+        if (s.name.includes('Treino ')) {
+          const part = s.name.split('Treino ')[1];
+          letter = part ? part.charAt(0).toUpperCase() : 'T';
+        } else if (s.name.toLowerCase().includes('livre')) {
+          letter = 'L';
+        } else {
+          letter = s.name.charAt(0).toUpperCase();
+        }
+        workoutsByDay[dayNum] = { name: s.name, letter: letter, date: s.date };
+      }
+    });
+
+    const daysCells = [];
+    // Espaços vazios antes do 1º dia
+    for (let i = 0; i < startDayOfWeek; i++) {
+      daysCells.push(<div key={`empty-${i}`} className="h-9"></div>);
+    }
+
+    // Dias do mês
+    for (let day = 1; day <= totalDays; day++) {
+      const workoutInfo = workoutsByDay[day];
+      const isToday = day === today.getDate();
+
+      daysCells.push(
+        <button
+          key={`day-${day}`}
+          type="button"
+          onClick={() => {
+            if (workoutInfo) {
+              setSelectedCalendarDayInfo(workoutInfo);
+            }
+          }}
+          className={`h-9 rounded-xl flex flex-col items-center justify-center relative transition ${
+            workoutInfo 
+              ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold active:scale-90 shadow-sm' 
+              : isToday 
+              ? 'border border-slate-700 bg-slate-900/60 text-white font-semibold' 
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <span className="text-[11px] leading-none">{day}</span>
+          {workoutInfo && (
+            <span className="text-[8px] font-black text-emerald-400 leading-none mt-0.5">
+              {workoutInfo.letter}
+            </span>
+          )}
+        </button>
+      );
+    }
+
+    return daysCells;
+  }
+
+  /* ------------------- RENDER: TELA DE ESCOLHA DE TREINO (TELA INICIAL) ------------------- */
   if (!activeSession) {
+    const today = new Date();
+    const monthName = today.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
     return (
       <div className="pb-24 pt-2 px-4 max-w-lg mx-auto">
+        {/* Modal de Relatório Pronto (logo após finalizar um treino) */}
+        {finishedReportText && (
+          <div className="mb-5 bg-slate-900 border border-emerald-500/40 rounded-3xl p-5 shadow-2xl animate-in fade-in">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle className="w-4 h-4" /> Treino Salvo com Sucesso!
+              </span>
+              <button onClick={() => setFinishedReportText(null)} className="text-slate-500 hover:text-white p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-300 mb-3">
+              Gere e copie o relatório deste treino para mostrar ao seu personal ou analisar em uma IA.
+            </p>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(finishedReportText);
+                alert('Relatório copiado! Cole no WhatsApp ou na sua IA favorita.');
+              }}
+              className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 active:scale-95 transition"
+            >
+              <Copy className="w-4 h-4" /> Copiar Relatório em Texto
+            </button>
+          </div>
+        )}
+
+        {/* PLACAR DE FREQUÊNCIA: Treinos no Mês & Treinos no Ano */}
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-lg flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Este Mês</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-black text-white">{monthCount}</span>
+                <span className="text-xs text-slate-400">treinos</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-lg flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+              <Trophy className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Este Ano</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-black text-white">{yearCount}</span>
+                <span className="text-xs text-slate-400">treinos</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* MINI CALENDÁRIO DA TELA INICIAL */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 mb-6 shadow-xl">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <span className="text-xs font-bold text-slate-200 capitalize flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-emerald-400" /> {monthName}
+            </span>
+            <span className="text-[10px] text-slate-400 font-medium">
+              Toque nos dias marcados para ver
+            </span>
+          </div>
+
+          {/* Dias da Semana (Seg a Dom) */}
+          <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            <span>Seg</span>
+            <span>Ter</span>
+            <span>Qua</span>
+            <span>Qui</span>
+            <span>Sex</span>
+            <span>Sáb</span>
+            <span>Dom</span>
+          </div>
+
+          {/* Grade de Dias */}
+          <div className="grid grid-cols-7 gap-1">
+            {renderCalendarGrid()}
+          </div>
+
+          {/* Tooltip/Aviso do Dia Clicado no Calendário */}
+          {selectedCalendarDayInfo && (
+            <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-300 animate-in fade-in">
+              <span className="truncate">
+                Dia {new Date(selectedCalendarDayInfo.date).getDate()}: <strong className="text-emerald-400">{selectedCalendarDayInfo.name}</strong>
+              </span>
+              <button onClick={() => setSelectedCalendarDayInfo(null)} className="text-slate-500 hover:text-white text-[11px] ml-2">
+                Fechar
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Banner do Dia */}
         <div className="bg-gradient-to-br from-slate-900 to-slate-900/60 border border-slate-800 rounded-3xl p-5 mb-6 shadow-xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
@@ -566,7 +796,6 @@ export default function ActiveWorkout({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Botão Cancelar Discreto */}
           <button
             onClick={handleCancelWorkout}
             className="text-[11px] text-slate-500 hover:text-rose-400 px-2 py-1.5 rounded-xl border border-transparent hover:border-slate-800 transition"
@@ -574,7 +803,6 @@ export default function ActiveWorkout({
             Cancelar
           </button>
 
-          {/* Botão Finalizar Seguro no Topo */}
           <button
             onClick={() => setShowFinishConfirmModal(true)}
             className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1 shadow-md shadow-emerald-500/20 active:scale-95 transition"
@@ -593,7 +821,6 @@ export default function ActiveWorkout({
           const isBodyweight = ex?.type === 'bodyweight';
           const isMinimized = item.isMinimized;
 
-          // Resumo das séries feitas para o card minimizado
           const completedSets = item.sets.filter(s => s.completed);
           const maxWeight = completedSets.reduce((max, s) => Math.max(max, parseFloat(s.weight_kg) || 0), 0);
 
@@ -610,7 +837,6 @@ export default function ActiveWorkout({
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    {/* Numerador de Exercício */}
                     <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
                       Exercício {exIdx + 1} de {sessionExercises.length}
                     </span>
@@ -630,7 +856,6 @@ export default function ActiveWorkout({
 
                   <div className="flex items-center gap-2">
                     <h3 className="font-bold text-white text-base">{ex?.name}</h3>
-                    {/* Botão de Editar Exercício Durante o Treino */}
                     <button
                       onClick={() => handleOpenEditExercise(exIdx)}
                       className="p-1 text-slate-500 hover:text-emerald-400 rounded-lg hover:bg-slate-800 transition"
@@ -645,7 +870,6 @@ export default function ActiveWorkout({
                     )}
                   </div>
 
-                  {/* Inteligência de Carga Anterior */}
                   {!isMinimized && (
                     last ? (
                       <p className="text-[11px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
@@ -662,7 +886,6 @@ export default function ActiveWorkout({
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0 ml-2">
-                  {/* Botão de Minimizar / Expandir */}
                   <button
                     onClick={() => handleToggleMinimizeExercise(exIdx)}
                     className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800/80 transition"
@@ -683,7 +906,7 @@ export default function ActiveWorkout({
                 </div>
               </div>
 
-              {/* CORPO EXPANDIDO (Tabela de Séries + Botão Concluir Exercício) */}
+              {/* CORPO EXPANDIDO */}
               {!isMinimized && (
                 <div className="space-y-1.5 mt-3 pt-2 border-t border-slate-800/60">
                   <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
@@ -697,7 +920,6 @@ export default function ActiveWorkout({
                   {item.sets.map((set, setIdx) => (
                     <React.Fragment key={setIdx}>
                       {set.completed ? (
-                        /* LINHA MINIMIZADA E BLOQUEADA (quando a série está Feita) */
                         <div className="grid grid-cols-12 gap-2 items-center py-1.5 px-2.5 rounded-xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
                           <div className="col-span-2 text-center font-bold text-xs text-emerald-400/80 flex items-center justify-center gap-1">
                             #{set.set_number}
@@ -730,7 +952,6 @@ export default function ActiveWorkout({
                           </div>
                         </div>
                       ) : (
-                        /* LINHA NORMAL EM EDIÇÃO */
                         <div className="grid grid-cols-12 gap-2 items-center p-1.5 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
                           <div className="col-span-2 text-center font-bold text-xs text-slate-400">
                             #{set.set_number}
@@ -784,7 +1005,7 @@ export default function ActiveWorkout({
                     </React.Fragment>
                   ))}
 
-                  {/* Ações do Exercício: Adicionar Série e Finalizar Exercício */}
+                  {/* Ações do Exercício */}
                   <div className="grid grid-cols-2 gap-2 pt-2">
                     <button
                       type="button"
@@ -794,7 +1015,6 @@ export default function ActiveWorkout({
                       <Plus className="w-3.5 h-3.5" /> Adicionar Série
                     </button>
 
-                    {/* BOTÃO FINALIZAR EXERCÍCIO (Minimiza o card completo) */}
                     <button
                       type="button"
                       onClick={() => handleToggleMinimizeExercise(exIdx)}

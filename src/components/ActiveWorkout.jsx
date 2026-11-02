@@ -453,17 +453,21 @@ export default function ActiveWorkout({
 
       if (sessionError) throw sessionError;
 
-      // 2. Cria as séries registradas
+      // 2. Cria as séries registradas mantendo estritamente a ordem dos exercícios e séries
       const setsToInsert = [];
+      const baseTime = new Date().getTime();
+      let orderOffset = 0;
       sessionExercises.forEach(item => {
         item.sets.forEach(s => {
           if (s.completed || s.reps) {
+            orderOffset++;
             setsToInsert.push({
               session_id: sessionData.id,
               exercise_id: item.exercise.id,
               set_number: s.set_number,
               weight_kg: parseFloat(s.weight_kg) || 0,
               reps: parseInt(s.reps, 10) || 0,
+              created_at: new Date(baseTime + orderOffset * 1000).toISOString()
             });
           }
         });

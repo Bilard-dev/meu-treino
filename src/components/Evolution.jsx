@@ -2,6 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { TrendingUp, Calendar, Building2, Dumbbell, ChevronRight, ChevronDown, Trash2, Award, Copy, Check } from 'lucide-react';
 
+// Agrupa as séries por exercício mantendo estritamente a ordem que foram executadas
+function groupSetsByExercise(sets) {
+  const exerciseMap = new Map();
+  (sets || []).forEach(st => {
+    const exId = st.exercises?.id || st.exercise_id || 'unknown';
+    if (!exerciseMap.has(exId)) {
+      exerciseMap.set(exId, {
+        exercise: st.exercises || { name: 'Exercício', type: 'free_weight' },
+        sets: []
+      });
+    }
+    exerciseMap.get(exId).sets.push(st);
+  });
+  // Garante que dentro de cada exercício as séries fiquem na ordem 1, 2, 3...
+  for (const item of exerciseMap.values()) {
+    item.sets.sort((a, b) => a.set_number - b.set_number);
+  }
+  return Array.from(exerciseMap.values());
+}
+
 export default function Evolution({ profile, gyms }) {
   const [activeSubTab, setActiveSubTab] = useState('history'); // 'history' | 'charts'
   const [sessions, setSessions] = useState([]);
@@ -80,11 +100,11 @@ export default function Evolution({ profile, gyms }) {
         const { data } = await supabase
           .from('workout_sets')
           .select(`
-            id, set_number, weight_kg, reps,
+            id, set_number, weight_kg, reps, created_at,
             exercises (id, name, muscle_group, type)
           `)
           .eq('session_id', sessionId)
-          .order('set_number', { ascending: true });
+          .order('created_at', { ascending: true });
 
         setSessionSets(prev => ({
           ...prev,
@@ -115,24 +135,18 @@ export default function Evolution({ profile, gyms }) {
     text += `📅 Data: ${dateStr} • Academia: ${gymStr}\n`;
     text += `💪 Treino: ${session.name}\n\n`;
 
-    const grouped = sets.reduce((acc, curr) => {
-      const name = curr.exercises?.name || 'Exercício';
-      if (!acc[name]) acc[name] = [];
-      acc[name].push(curr);
-      return acc;
-    }, {});
+    const orderedExerciseList = groupSetsByExercise(sets);
 
-    let i = 1;
-    for (const [exName, sList] of Object.entries(grouped)) {
-      const type = sList[0]?.exercises?.type === 'machine' ? 'Máquina' : sList[0]?.exercises?.type === 'bodyweight' ? 'Corporal' : 'Livre';
-      text += `${i}. ${exName} (${type})\n`;
-      sList.forEach(st => {
-        const weightStr = sList[0]?.exercises?.type === 'bodyweight' && (!st.weight_kg || parseFloat(st.weight_kg) === 0) ? 'Peso Corporal' : `${st.weight_kg}kg`;
+    orderedExerciseList.forEach((item, idx) => {
+      const ex = item.exercise;
+      const type = ex.type === 'machine' ? 'Máquina' : ex.type === 'bodyweight' ? 'Corporal' : 'Livre';
+      text += `${idx + 1}. ${ex.name} (${type})\n`;
+      item.sets.forEach(st => {
+        const weightStr = ex.type === 'bodyweight' && (!st.weight_kg || parseFloat(st.weight_kg) === 0) ? 'Peso Corporal' : `${st.weight_kg}kg`;
         text += `   - Série ${st.set_number}: ${weightStr} x ${st.reps} reps\n`;
       });
       text += `\n`;
-      i++;
-    }
+    });
     text += `Total de séries completadas: ${sets.length}\n`;
 
     navigator.clipboard.writeText(text);
@@ -297,32 +311,33 @@ export default function Evolution({ profile, gyms }) {
                               </button>
                             </div>
 
-                            {Object.entries(
-                              sets.reduce((acc, curr) => {
-                                const exName = curr.exercises?.name || 'Exercício';
-                                if (!acc[exName]) acc[exName] = [];
-                                acc[exName].push(curr);
-                                return acc;
-                              }, {})
-                            ).map(([exName, exerciseSets]) => (
-                              <div key={exName} className="bg-slate-950 p-3 rounded-2xl border border-slate-800/80">
-                                <h5 className="font-bold text-xs text-slate-200 mb-1.5">{exName}</h5>
-                                <div className="flex flex-wrap gap-2">
-                                  {exerciseSets.map(st => {
-                                    const isBw = st.exercises?.type === 'bodyweight';
-                                    const displayWeight = isBw && (!st.weight_kg || parseFloat(st.weight_kg) === 0) ? 'Corpo' : `${st.weight_kg}kg`;
-                                    return (
-                                      <span
-                                        key={st.id}
-                                        className="text-[11px] bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-xl text-slate-300 font-mono"
-                                      >
-                                        #{st.set_number}: <strong className="text-emerald-400">{displayWeight}</strong> × {st.reps} reps
-                                      </span>
-                                    );
-                                  })}
+                            {groupSetsByExercise(sets).map((item, idx) => {
+                              const exName = item.exercise?.name || 'Exercício';
+                              return (
+                                <div key={item.exercise?.id || idx} className="bg-slate-950 p-3 rounded-2xl border border-slate-800/80">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="w-5 h-5 rounded-full bg-slate-800 text-[10px] font-bold text-slate-300 flex items-center justify-center shrink-0">
+                                      {idx + 1}
+                                    </span>
+                                    <h5 className="font-bold text-xs text-slate-200">{exName}</h5>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 pl-7">
+                                    {item.sets.map(st => {
+                                      const isBw = item.exercise?.type === 'bodyweight';
+                                      const displayWeight = isBw && (!st.weight_kg || parseFloat(st.weight_kg) === 0) ? 'Corpo' : `${st.weight_kg}kg`;
+                                      return (
+                                        <span
+                                          key={st.id}
+                                          className="text-[11px] bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-xl text-slate-300 font-mono"
+                                        >
+                                          #{st.set_number}: <strong className="text-emerald-400">{displayWeight}</strong> × {st.reps} reps
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </>
                         )}
                       </div>

@@ -1,0 +1,19 @@
+{
+  "name": "Meu Treino",
+  "short_name": "Meu Treino",
+  "description": "Aplicativo para registro e evolução nos treinos de musculação",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import confetti from 'canvas-confetti';
 import { 
   Play, Plus, Check, Trash2, Clock, Dumbbell, 
   ChevronDown, ChevronUp, Flame, Sparkles, AlertCircle, ArrowLeft,
-  ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle
+  ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle, Edit2
 } from 'lucide-react';
 
 export default function ActiveWorkout({ 
@@ -34,6 +34,13 @@ export default function ActiveWorkout({
   const [newExerciseName, setNewExerciseName] = useState('');
   const [newExerciseMuscle, setNewExerciseMuscle] = useState('Peito');
   const [newExerciseType, setNewExerciseType] = useState('machine');
+
+  // Modal de Edição de Exercício Durante o Treino
+  const [editingExerciseIdx, setEditingExerciseIdx] = useState(null);
+  const [editExName, setEditExName] = useState('');
+  const [editExMuscle, setEditExMuscle] = useState('Peito');
+  const [editExType, setEditExType] = useState('machine');
+  const [savingEditEx, setSavingEditEx] = useState(false);
 
   useEffect(() => {
     loadInitialData();
@@ -114,6 +121,7 @@ export default function ActiveWorkout({
 
   // Buscar última carga inteligente para um exercício
   async function fetchLastLoad(exercise) {
+    if (!exercise) return;
     try {
       let query = supabase
         .from('workout_sets')
@@ -154,10 +162,11 @@ export default function ActiveWorkout({
       .map(item => {
         const sets = [];
         const numSets = item.default_sets || 4;
+        const isBodyweight = item.exercises?.type === 'bodyweight';
         for (let i = 1; i <= numSets; i++) {
           sets.push({
             set_number: i,
-            weight_kg: '',
+            weight_kg: isBodyweight ? '0' : '',
             reps: '',
             rest_seconds: item.default_rest_seconds || 60,
             completed: false
@@ -198,14 +207,15 @@ export default function ActiveWorkout({
   // Adicionar exercício na sessão atual
   function handleAddExerciseToSession(exercise) {
     fetchLastLoad(exercise);
+    const isBodyweight = exercise.type === 'bodyweight';
     setSessionExercises(prev => [
       ...prev,
       {
         exercise: exercise,
         sets: [
-          { set_number: 1, weight_kg: '', reps: '', rest_seconds: 60, completed: false },
-          { set_number: 2, weight_kg: '', reps: '', rest_seconds: 60, completed: false },
-          { set_number: 3, weight_kg: '', reps: '', rest_seconds: 60, completed: false },
+          { set_number: 1, weight_kg: isBodyweight ? '0' : '', reps: '', rest_seconds: 60, completed: false },
+          { set_number: 2, weight_kg: isBodyweight ? '0' : '', reps: '', rest_seconds: 60, completed: false },
+          { set_number: 3, weight_kg: isBodyweight ? '0' : '', reps: '', rest_seconds: 60, completed: false },
         ],
         isMinimized: false
       }
@@ -220,6 +230,57 @@ export default function ActiveWorkout({
       updated[exIndex].isMinimized = !updated[exIndex].isMinimized;
       return updated;
     });
+  }
+
+  // Abrir modal para editar exercício no meio do treino
+  function handleOpenEditExercise(exIdx) {
+    const ex = sessionExercises[exIdx].exercise;
+    setEditingExerciseIdx(exIdx);
+    setEditExName(ex.name);
+    setEditExMuscle(ex.muscle_group);
+    setEditExType(ex.type || 'free_weight');
+  }
+
+  // Salvar edição do exercício no banco e atualizar sessão ativa
+  async function handleSaveExerciseEdit(e) {
+    e.preventDefault();
+    if (!editExName.trim() || editingExerciseIdx === null) return;
+    setSavingEditEx(true);
+    const targetEx = sessionExercises[editingExerciseIdx].exercise;
+
+    try {
+      const { data, error } = await supabase
+        .from('exercises')
+        .update({
+          name: editExName.trim(),
+          muscle_group: editExMuscle,
+          type: editExType
+        })
+        .eq('id', targetEx.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Atualiza na sessão ativa
+      setSessionExercises(prev => {
+        const copy = [...prev];
+        copy[editingExerciseIdx].exercise = data;
+        return copy;
+      });
+
+      // Atualiza na lista de todos os exercícios
+      setAllExercises(prev => prev.map(e => e.id === data.id ? data : e));
+
+      // Recalcula última carga com a nova tipagem
+      fetchLastLoad(data);
+      setEditingExerciseIdx(null);
+    } catch (err) {
+      console.error('Erro ao editar exercício:', err);
+      alert('Erro ao atualizar exercício.');
+    } finally {
+      setSavingEditEx(false);
+    }
   }
 
   // Criar novo exercício do zero e já adicionar na sessão
@@ -252,17 +313,22 @@ export default function ActiveWorkout({
   function handleUpdateSet(exIndex, setIndex, field, value) {
     setSessionExercises(prev => {
       const updated = [...prev];
+      const ex = updated[exIndex].exercise;
+      const isBodyweight = ex?.type === 'bodyweight';
       const currentSet = { ...updated[exIndex].sets[setIndex], [field]: value };
 
       // Se for alteração direta de 'completed'
       if (field === 'completed') {
         currentSet.completed = value;
       } 
-      // Auto-marca como "Feito" quando digitar repetições (se o peso já estiver preenchido)
-      else if (field === 'reps' && value && String(value).trim() !== '' && currentSet.weight_kg !== '') {
-        currentSet.completed = true;
+      // Auto-marca como "Feito" quando digitar repetições
+      else if (field === 'reps' && value && String(value).trim() !== '') {
+        // Se for peso corporal, não exige peso obrigatoriamente
+        if (isBodyweight || currentSet.weight_kg !== '') {
+          currentSet.completed = true;
+        }
       }
-      // Auto-marca como "Feito" quando preencher peso (se as repetições já estiverem preenchidas)
+      // Auto-marca como "Feito" quando preencher peso (se reps já preenchidas)
       else if (field === 'weight_kg' && value && String(value).trim() !== '' && currentSet.reps !== '') {
         currentSet.completed = true;
       }
@@ -277,10 +343,12 @@ export default function ActiveWorkout({
     setSessionExercises(prev => {
       const updated = [...prev];
       const currentSets = updated[exIndex].sets;
+      const ex = updated[exIndex].exercise;
+      const isBodyweight = ex?.type === 'bodyweight';
       const lastSet = currentSets[currentSets.length - 1];
       currentSets.push({
         set_number: currentSets.length + 1,
-        weight_kg: lastSet ? lastSet.weight_kg : '',
+        weight_kg: lastSet ? lastSet.weight_kg : (isBodyweight ? '0' : ''),
         reps: lastSet ? lastSet.reps : '',
         rest_seconds: lastSet ? lastSet.rest_seconds : 60,
         completed: false
@@ -342,8 +410,8 @@ export default function ActiveWorkout({
       const setsToInsert = [];
       sessionExercises.forEach(item => {
         item.sets.forEach(s => {
-          // Salva séries concluídas ou que tenham peso/reps informados
-          if (s.completed || (s.weight_kg && s.reps)) {
+          // Salva séries concluídas ou que tenham reps informadas
+          if (s.completed || s.reps) {
             setsToInsert.push({
               session_id: sessionData.id,
               exercise_id: item.exercise.id,
@@ -486,7 +554,7 @@ export default function ActiveWorkout({
         </div>
       )}
 
-      {/* Top Header do Treino Ativo: Limpo, Seguro e com Botão Compacto */}
+      {/* Top Header do Treino Ativo */}
       <div className="sticky top-14 z-30 bg-slate-950/95 backdrop-blur-md py-2.5 border-b border-slate-800/80 flex items-center justify-between mb-4">
         <div>
           <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wider">
@@ -522,6 +590,7 @@ export default function ActiveWorkout({
           const ex = item.exercise;
           const last = lastLoads[ex?.id];
           const isMachine = ex?.type === 'machine';
+          const isBodyweight = ex?.type === 'bodyweight';
           const isMinimized = item.isMinimized;
 
           // Resumo das séries feitas para o card minimizado
@@ -537,7 +606,7 @@ export default function ActiveWorkout({
                   : 'border-slate-800 p-4'
               }`}
             >
-              {/* Header do Exercício com NUMERADOR (ex: Exercício 1 de 6) */}
+              {/* Header do Exercício com NUMERADOR e BOTÃO EDITAR */}
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -551,22 +620,32 @@ export default function ActiveWorkout({
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                       isMachine 
                         ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20' 
+                        : isBodyweight
+                        ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20'
                         : 'bg-blue-500/10 text-blue-300 border border-blue-500/20'
                     }`}>
-                      {isMachine ? '⚙️ Máquina / Polia' : '🏋️ Peso Livre'}
+                      {isMachine ? '⚙️ Máquina / Polia' : isBodyweight ? '🤸 Peso Corporal' : '🏋️ Peso Livre'}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <h3 className="font-bold text-white text-base">{ex?.name}</h3>
+                    {/* Botão de Editar Exercício Durante o Treino */}
+                    <button
+                      onClick={() => handleOpenEditExercise(exIdx)}
+                      className="p-1 text-slate-500 hover:text-emerald-400 rounded-lg hover:bg-slate-800 transition"
+                      title="Editar nome ou tipo deste exercício"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
                     {isMinimized && (
-                      <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                        <CheckCircle className="w-3.5 h-3.5" /> Concluído ({completedSets.length} séries • máx {maxWeight}kg)
+                      <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1 ml-1">
+                        <CheckCircle className="w-3.5 h-3.5" /> Feito ({completedSets.length} séries {isBodyweight ? '' : `• máx ${maxWeight}kg`})
                       </span>
                     )}
                   </div>
 
-                  {/* Inteligência de Carga Anterior (quando não estiver minimizado) */}
+                  {/* Inteligência de Carga Anterior */}
                   {!isMinimized && (
                     last ? (
                       <p className="text-[11px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
@@ -609,7 +688,7 @@ export default function ActiveWorkout({
                 <div className="space-y-1.5 mt-3 pt-2 border-t border-slate-800/60">
                   <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
                     <div className="col-span-2 text-center">Série</div>
-                    <div className="col-span-3 text-center">Kg</div>
+                    <div className="col-span-3 text-center">{isBodyweight ? '+Kg (opt)' : 'Kg'}</div>
                     <div className="col-span-3 text-center">Reps</div>
                     <div className="col-span-2 text-center">Desc.</div>
                     <div className="col-span-2 text-center">Feito</div>
@@ -625,8 +704,9 @@ export default function ActiveWorkout({
                           </div>
 
                           <div className="col-span-3 text-center">
-                            <span className="text-xs font-black text-white">{set.weight_kg}</span>
-                            <span className="text-[10px] text-slate-400 font-normal ml-0.5">kg</span>
+                            <span className="text-xs font-black text-white">
+                              {isBodyweight && (set.weight_kg === '0' || !set.weight_kg) ? 'Corpo' : `${set.weight_kg}kg`}
+                            </span>
                           </div>
 
                           <div className="col-span-3 text-center">
@@ -650,7 +730,7 @@ export default function ActiveWorkout({
                           </div>
                         </div>
                       ) : (
-                        /* LINHA NORMAL EM EDIÇÃO (quando ainda não foi feita ou foi destravada) */
+                        /* LINHA NORMAL EM EDIÇÃO */
                         <div className="grid grid-cols-12 gap-2 items-center p-1.5 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
                           <div className="col-span-2 text-center font-bold text-xs text-slate-400">
                             #{set.set_number}
@@ -660,7 +740,7 @@ export default function ActiveWorkout({
                             <input
                               type="number"
                               inputMode="decimal"
-                              placeholder="0"
+                              placeholder={isBodyweight ? "0" : "0"}
                               value={set.weight_kg}
                               onChange={(e) => handleUpdateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
                               className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
@@ -738,7 +818,7 @@ export default function ActiveWorkout({
           Adicionar Exercício ao Treino
         </button>
 
-        {/* Botão Secundário de Finalizar no Final da Página (com espaçamento seguro) */}
+        {/* Botão Secundário de Finalizar no Final da Página */}
         <div className="pt-4 pb-2">
           <button
             onClick={() => setShowFinishConfirmModal(true)}
@@ -749,7 +829,76 @@ export default function ActiveWorkout({
         </div>
       </div>
 
-      {/* Modal de Confirmação para Finalizar o Treino (Anti-Clique Acidental) */}
+      {/* Modal: Editar Exercício no Meio do Treino */}
+      {editingExerciseIdx !== null && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 shadow-2xl">
+            <h3 className="text-base font-bold text-white mb-1">Editar Exercício</h3>
+            <p className="text-xs text-slate-400 mb-4">Altere o nome, músculo ou categoria deste exercício.</p>
+
+            <form onSubmit={handleSaveExerciseEdit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nome</label>
+                <input
+                  type="text"
+                  value={editExName}
+                  onChange={e => setEditExName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Músculo</label>
+                <select
+                  value={editExMuscle}
+                  onChange={e => setEditExMuscle(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                >
+                  <option value="Peito">Peito</option>
+                  <option value="Costas">Costas</option>
+                  <option value="Pernas">Pernas</option>
+                  <option value="Ombros">Ombros</option>
+                  <option value="Bíceps">Bíceps</option>
+                  <option value="Tríceps">Tríceps</option>
+                  <option value="Abdômen">Abdômen</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Categoria de Carga</label>
+                <select
+                  value={editExType}
+                  onChange={e => setEditExType(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                >
+                  <option value="machine">⚙️ Máquina / Polia (lembra por academia)</option>
+                  <option value="free_weight">🏋️ Peso Livre / Halter (geral)</option>
+                  <option value="bodyweight">🤸 Peso Corporal / Calistenia (ex: paralela)</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingExerciseIdx(null)}
+                  className="flex-1 py-2.5 text-xs text-slate-400 bg-slate-800 rounded-xl hover:bg-slate-700 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEditEx}
+                  className="flex-1 py-2.5 text-xs font-bold text-slate-950 bg-emerald-500 rounded-xl hover:bg-emerald-400 transition"
+                >
+                  {savingEditEx ? 'Salvando...' : 'Salvar Alteração'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação para Finalizar o Treino */}
       {showFinishConfirmModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center">
@@ -801,7 +950,7 @@ export default function ActiveWorkout({
               <span className="text-[11px] font-bold text-slate-400 block">Cadastrar Novo:</span>
               <input
                 type="text"
-                placeholder="Nome (ex: Elevação Frontal)"
+                placeholder="Nome (ex: Paralelas na Barra)"
                 value={newExerciseName}
                 onChange={e => setNewExerciseName(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
@@ -828,6 +977,7 @@ export default function ActiveWorkout({
                 >
                   <option value="machine">⚙️ Máquina / Polia</option>
                   <option value="free_weight">🏋️ Peso Livre</option>
+                  <option value="bodyweight">🤸 Peso Corporal</option>
                 </select>
               </div>
 
@@ -850,7 +1000,9 @@ export default function ActiveWorkout({
                   className="w-full text-left p-3 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800/80 flex items-center justify-between text-xs text-slate-200 transition"
                 >
                   <span className="font-semibold">{ex.name}</span>
-                  <span className="text-[10px] text-slate-500">{ex.muscle_group} • {ex.type === 'machine' ? 'Máquina' : 'Livre'}</span>
+                  <span className="text-[10px] text-slate-500">
+                    {ex.muscle_group} • {ex.type === 'machine' ? 'Máquina' : ex.type === 'bodyweight' ? 'Corporal' : 'Livre'}
+                  </span>
                 </button>
               ))}
             </div>

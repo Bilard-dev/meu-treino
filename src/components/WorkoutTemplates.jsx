@@ -240,20 +240,23 @@ export default function WorkoutTemplates({ profile }) {
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-slate-800/60">
-                  {exList.map((item, idx) => (
-                    <div key={item.id} className="flex items-center justify-between text-xs py-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500 font-mono w-4">{idx + 1}.</span>
-                        <span className="font-semibold text-slate-200">{item.exercises?.name}</span>
-                        <span className="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                          {item.exercises?.type === 'machine' ? 'Máquina' : 'Livre'}
+                  {exList.map((item, idx) => {
+                    const exType = item.exercises?.type;
+                    return (
+                      <div key={item.id} className="flex items-center justify-between text-xs py-1">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="text-slate-500 font-mono w-4">{idx + 1}.</span>
+                          <span className="font-semibold text-slate-200 truncate">{item.exercises?.name}</span>
+                          <span className="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800 shrink-0">
+                            {exType === 'machine' ? 'Máquina' : exType === 'bodyweight' ? 'Corporal' : 'Livre'}
+                          </span>
+                        </div>
+                        <span className="text-slate-400 font-mono text-[11px] shrink-0 ml-2">
+                          {item.default_sets} séries • {item.default_rest_seconds}s
                         </span>
                       </div>
-                      <span className="text-slate-400 font-mono text-[11px]">
-                        {item.default_sets} séries • {item.default_rest_seconds}s desc.
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -299,11 +302,14 @@ export default function WorkoutTemplates({ profile }) {
                 <div className="space-y-2 mb-3">
                   {templateExercises.map((item, idx) => {
                     const ex = exercises.find(e => e.id === item.exercise_id);
+                    const exType = ex?.type;
                     return (
                       <div key={idx} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-2">
                         <div className="flex-1 truncate">
                           <span className="font-bold text-xs text-white block truncate">{ex?.name || 'Exercício'}</span>
-                          <span className="text-[10px] text-slate-400">{ex?.muscle_group} • {ex?.type === 'machine' ? 'Máquina' : 'Livre'}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {ex?.muscle_group} • {exType === 'machine' ? 'Máquina' : exType === 'bodyweight' ? 'Corporal' : 'Livre'}
+                          </span>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -367,7 +373,7 @@ export default function WorkoutTemplates({ profile }) {
                     <option value="" disabled>+ Selecionar exercício para adicionar...</option>
                     {exercises.map(e => (
                       <option key={e.id} value={e.id}>
-                        {e.name} ({e.muscle_group} - {e.type === 'machine' ? 'Máquina' : 'Livre'})
+                        {e.name} ({e.muscle_group} - {e.type === 'machine' ? 'Máquina' : e.type === 'bodyweight' ? 'Corporal' : 'Livre'})
                       </option>
                     ))}
                   </select>
@@ -411,6 +417,7 @@ export default function WorkoutTemplates({ profile }) {
                         >
                           <option value="machine">⚙️ Máquina</option>
                           <option value="free_weight">🏋️ Peso Livre</option>
+                          <option value="bodyweight">🤸 Peso Corporal</option>
                         </select>
                       </div>
                       <button

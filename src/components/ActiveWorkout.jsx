@@ -339,23 +339,29 @@ export default function ActiveWorkout({
     }
   }
 
-  // Alterar dados de uma série com Auto-Completar Inteligente
+  // Alterar dados de uma série sem fechar o teclado no meio da digitação
   function handleUpdateSet(exIndex, setIndex, field, value) {
+    setSessionExercises(prev => {
+      const updated = [...prev];
+      const currentSet = { ...updated[exIndex].sets[setIndex], [field]: value };
+      updated[exIndex].sets[setIndex] = currentSet;
+      return updated;
+    });
+  }
+
+  // Ao sair do campo ou pressionar Enter (onBlur), valida e marca automaticamente como feito se estiver preenchido
+  function handleBlurSet(exIndex, setIndex) {
     setSessionExercises(prev => {
       const updated = [...prev];
       const ex = updated[exIndex].exercise;
       const isBodyweight = ex?.type === 'bodyweight';
-      const currentSet = { ...updated[exIndex].sets[setIndex], [field]: value };
+      const currentSet = { ...updated[exIndex].sets[setIndex] };
 
-      if (field === 'completed') {
-        currentSet.completed = value;
-      } 
-      else if (field === 'reps' && value && String(value).trim() !== '') {
-        if (isBodyweight || currentSet.weight_kg !== '') {
-          currentSet.completed = true;
-        }
-      }
-      else if (field === 'weight_kg' && value && String(value).trim() !== '' && currentSet.reps !== '') {
+      const hasReps = currentSet.reps !== '' && parseInt(currentSet.reps, 10) > 0;
+      const hasWeight = isBodyweight || (currentSet.weight_kg !== '' && parseFloat(currentSet.weight_kg) >= 0);
+
+      // Só marca como feito se tiver preenchido as repetições e o peso (ou for corporal)
+      if (hasReps && hasWeight) {
         currentSet.completed = true;
       }
 
@@ -382,10 +388,11 @@ export default function ActiveWorkout({
     });
   }
 
-  // Remover uma série
+  // Remover uma série rapidamente
   function handleRemoveSet(exIndex, setIndex) {
     setSessionExercises(prev => {
       const updated = [...prev];
+      if (updated[exIndex].sets.length <= 1) return prev; // Mantém pelo menos 1 série no exercício
       updated[exIndex].sets.splice(setIndex, 1);
       updated[exIndex].sets.forEach((s, idx) => s.set_number = idx + 1);
       return updated;
@@ -896,81 +903,108 @@ export default function ActiveWorkout({
               {/* CORPO EXPANDIDO (Tabela com CAMPOS LARGOS para Kg e Reps, sem descanso) */}
               {!isMinimized && (
                 <div className="space-y-1.5 mt-3 pt-2 border-t border-slate-800/60">
-                  <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
-                    <div className="col-span-2 text-center">Série</div>
-                    <div className="col-span-4 text-center">{isBodyweight ? '+Kg (opcional)' : 'Carga (Kg)'}</div>
-                    <div className="col-span-4 text-center">Repetições</div>
-                    <div className="col-span-2 text-center">Feito</div>
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
+                    <span className="w-7 text-center shrink-0">Série</span>
+                    <span className="flex-1 text-center">{isBodyweight ? '+Kg (opcional)' : 'Carga (Kg)'}</span>
+                    <span className="flex-1 text-center">Reps</span>
+                    <span className="w-9 text-center shrink-0">Feito</span>
+                    {item.sets.length > 1 && <span className="w-7 shrink-0" />}
                   </div>
 
                   {item.sets.map((set, setIdx) => (
                     <React.Fragment key={setIdx}>
                       {set.completed ? (
-                        <div className="grid grid-cols-12 gap-2 items-center py-2 px-3 rounded-xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
-                          <div className="col-span-2 text-center font-bold text-xs text-emerald-400/80 flex items-center justify-center gap-1">
+                        <div className="flex items-center gap-2 py-2 px-2.5 rounded-2xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
+                          <div className="w-7 text-center font-bold text-xs text-emerald-400/80 shrink-0">
                             #{set.set_number}
                           </div>
 
-                          <div className="col-span-4 text-center">
+                          <div className="flex-1 text-center">
                             <span className="text-sm font-black text-white">
                               {isBodyweight && (set.weight_kg === '0' || !set.weight_kg) ? 'Corpo' : `${set.weight_kg} kg`}
                             </span>
                           </div>
 
-                          <div className="col-span-4 text-center">
+                          <div className="flex-1 text-center">
                             <span className="text-sm font-black text-white">{set.reps}</span>
                             <span className="text-[11px] text-slate-400 font-normal ml-1">reps</span>
                           </div>
 
-                          <div className="col-span-2 flex items-center justify-center">
+                          <div className="w-9 flex items-center justify-center shrink-0">
                             <button
                               type="button"
                               onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', false)}
-                              className="w-8 h-8 rounded-lg bg-emerald-500 text-slate-950 flex items-center justify-center shadow-sm shadow-emerald-500/30 active:scale-90 transition"
+                              className="w-9 h-9 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center shadow-sm shadow-emerald-500/30 active:scale-90 transition"
                               title="Toque para destravar e editar"
                             >
                               <Check className="w-4 h-4 stroke-[3]" />
                             </button>
                           </div>
+
+                          {item.sets.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSet(exIdx, setIdx)}
+                              className="w-7 h-9 flex items-center justify-center text-slate-600 hover:text-rose-400 active:text-rose-500 transition shrink-0"
+                              title="Excluir esta série"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       ) : (
-                        <div className="grid grid-cols-12 gap-2 items-center p-2 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
-                          <div className="col-span-2 text-center font-bold text-sm text-slate-400">
+                        <div className="flex items-center gap-2 p-2 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
+                          <div className="w-7 text-center font-bold text-sm text-slate-400 shrink-0">
                             #{set.set_number}
                           </div>
 
-                          <div className="col-span-4">
+                          <div className="flex-1 min-w-0">
                             <input
                               type="number"
                               inputMode="decimal"
                               placeholder={isBodyweight ? "0" : "0"}
                               value={set.weight_kg}
                               onChange={(e) => handleUpdateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
+                              onBlur={() => handleBlurSet(exIdx, setIdx)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                               className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2.5 text-base font-bold text-white focus:outline-none focus:border-emerald-500"
                             />
                           </div>
 
-                          <div className="col-span-4">
+                          <div className="flex-1 min-w-0">
                             <input
                               type="number"
                               inputMode="numeric"
                               placeholder="0"
                               value={set.reps}
                               onChange={(e) => handleUpdateSet(exIdx, setIdx, 'reps', e.target.value)}
+                              onBlur={() => handleBlurSet(exIdx, setIdx)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                               className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2.5 text-base font-bold text-white focus:outline-none focus:border-emerald-500"
                             />
                           </div>
 
-                          <div className="col-span-2 flex items-center justify-center">
+                          <div className="w-9 flex items-center justify-center shrink-0">
                             <button
                               type="button"
                               onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', true)}
-                              className="w-10 h-10 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition active:scale-90"
+                              className="w-9 h-10 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition active:scale-90"
                               title="Marcar série como feita"
                             >
                               <Check className="w-5 h-5 stroke-[2.5]" />
                             </button>
                           </div>
+
+                          {item.sets.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSet(exIdx, setIdx)}
+                              className="w-7 h-10 flex items-center justify-center text-slate-600 hover:text-rose-400 active:text-rose-500 transition shrink-0"
+                              title="Excluir esta série"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       )}
                     </React.Fragment>

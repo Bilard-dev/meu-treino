@@ -3,8 +3,8 @@ import { supabase } from '../supabaseClient';
 import confetti from 'canvas-confetti';
 import { 
   Play, Plus, Check, Trash2, Clock, Dumbbell, 
-  ChevronDown, Flame, Sparkles, AlertCircle, ArrowLeft,
-  ShieldCheck, CheckCircle2, X, Lock, Unlock
+  ChevronDown, ChevronUp, Flame, Sparkles, AlertCircle, ArrowLeft,
+  ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle
 } from 'lucide-react';
 
 export default function ActiveWorkout({ 
@@ -165,7 +165,8 @@ export default function ActiveWorkout({
         }
         return {
           exercise: item.exercises,
-          sets: sets
+          sets: sets,
+          isMinimized: false
         };
       });
 
@@ -205,10 +206,20 @@ export default function ActiveWorkout({
           { set_number: 1, weight_kg: '', reps: '', rest_seconds: 60, completed: false },
           { set_number: 2, weight_kg: '', reps: '', rest_seconds: 60, completed: false },
           { set_number: 3, weight_kg: '', reps: '', rest_seconds: 60, completed: false },
-        ]
+        ],
+        isMinimized: false
       }
     ]);
     setShowAddExerciseModal(false);
+  }
+
+  // Alternar minimizar/expandir exercício
+  function handleToggleMinimizeExercise(exIndex) {
+    setSessionExercises(prev => {
+      const updated = [...prev];
+      updated[exIndex].isMinimized = !updated[exIndex].isMinimized;
+      return updated;
+    });
   }
 
   // Criar novo exercício do zero e já adicionar na sessão
@@ -243,7 +254,7 @@ export default function ActiveWorkout({
       const updated = [...prev];
       const currentSet = { ...updated[exIndex].sets[setIndex], [field]: value };
 
-      // Se for alteração direta de 'completed' (clique no botão de feito/desbloquear)
+      // Se for alteração direta de 'completed'
       if (field === 'completed') {
         currentSet.completed = value;
       } 
@@ -511,16 +522,29 @@ export default function ActiveWorkout({
           const ex = item.exercise;
           const last = lastLoads[ex?.id];
           const isMachine = ex?.type === 'machine';
+          const isMinimized = item.isMinimized;
+
+          // Resumo das séries feitas para o card minimizado
+          const completedSets = item.sets.filter(s => s.completed);
+          const maxWeight = completedSets.reduce((max, s) => Math.max(max, parseFloat(s.weight_kg) || 0), 0);
 
           return (
             <div
               key={exIdx}
-              className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-lg"
+              className={`bg-slate-900 border transition-all rounded-3xl shadow-lg ${
+                isMinimized 
+                  ? 'border-emerald-500/30 p-3.5 bg-slate-900/90' 
+                  : 'border-slate-800 p-4'
+              }`}
             >
-              {/* Header do Exercício */}
-              <div className="flex items-start justify-between mb-2">
-                <div>
-                  <div className="flex items-center gap-2 mb-0.5">
+              {/* Header do Exercício com NUMERADOR (ex: Exercício 1 de 6) */}
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    {/* Numerador de Exercício */}
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                      Exercício {exIdx + 1} de {sessionExercises.length}
+                    </span>
                     <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
                       {ex?.muscle_group}
                     </span>
@@ -532,149 +556,175 @@ export default function ActiveWorkout({
                       {isMachine ? '⚙️ Máquina / Polia' : '🏋️ Peso Livre'}
                     </span>
                   </div>
-                  <h3 className="font-bold text-white text-base">{ex?.name}</h3>
 
-                  {/* Inteligência de Carga Anterior */}
-                  {last ? (
-                    <p className="text-[11px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" />
-                      Última vez {isMachine ? `nesta academia (${currentGym?.name})` : 'geral'}:{' '}
-                      <strong>{last.weight} kg × {last.reps} reps</strong>
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Primeiro registro deste exercício {isMachine ? 'nesta academia' : ''}
-                    </p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-white text-base">{ex?.name}</h3>
+                    {isMinimized && (
+                      <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5" /> Concluído ({completedSets.length} séries • máx {maxWeight}kg)
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Inteligência de Carga Anterior (quando não estiver minimizado) */}
+                  {!isMinimized && (
+                    last ? (
+                      <p className="text-[11px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        Última vez {isMachine ? `nesta academia (${currentGym?.name})` : 'geral'}:{' '}
+                        <strong>{last.weight} kg × {last.reps} reps</strong>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Primeiro registro deste exercício {isMachine ? 'nesta academia' : ''}
+                      </p>
+                    )
                   )}
                 </div>
 
-                <button
-                  onClick={() => handleRemoveExerciseFromSession(exIdx)}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg transition"
-                  title="Tirar exercício deste treino"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+                <div className="flex items-center gap-1 shrink-0 ml-2">
+                  {/* Botão de Minimizar / Expandir */}
+                  <button
+                    onClick={() => handleToggleMinimizeExercise(exIdx)}
+                    className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800/80 transition"
+                    title={isMinimized ? 'Expandir exercício' : 'Minimizar exercício'}
+                  >
+                    {isMinimized ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                  </button>
 
-              {/* Tabela de Séries */}
-              <div className="space-y-1.5 mt-3">
-                <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
-                  <div className="col-span-2 text-center">Série</div>
-                  <div className="col-span-3 text-center">Kg</div>
-                  <div className="col-span-3 text-center">Reps</div>
-                  <div className="col-span-2 text-center">Desc.</div>
-                  <div className="col-span-2 text-center">Feito</div>
+                  {!isMinimized && (
+                    <button
+                      onClick={() => handleRemoveExerciseFromSession(exIdx)}
+                      className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg transition"
+                      title="Tirar exercício deste treino"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
-
-                {item.sets.map((set, setIdx) => (
-                  <React.Fragment key={setIdx}>
-                    {set.completed ? (
-                      /* LINHA MINIMIZADA E BLOQUEADA (quando a série está Feita) */
-                      <div className="grid grid-cols-12 gap-2 items-center py-1.5 px-2.5 rounded-xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
-                        {/* Número da série com cadeadinho discreto */}
-                        <div className="col-span-2 text-center font-bold text-xs text-emerald-400/80 flex items-center justify-center gap-1">
-                          #{set.set_number}
-                        </div>
-
-                        {/* Carga (Kg) minimizada e visível */}
-                        <div className="col-span-3 text-center">
-                          <span className="text-xs font-black text-white">{set.weight_kg}</span>
-                          <span className="text-[10px] text-slate-400 font-normal ml-0.5">kg</span>
-                        </div>
-
-                        {/* Repetições minimizadas */}
-                        <div className="col-span-3 text-center">
-                          <span className="text-xs font-black text-white">{set.reps}</span>
-                          <span className="text-[10px] text-slate-400 font-normal ml-0.5">reps</span>
-                        </div>
-
-                        {/* Descanso */}
-                        <div className="col-span-2 text-center text-[10px] text-slate-400">
-                          {set.rest_seconds || 60}s
-                        </div>
-
-                        {/* Botão para Desbloquear e Editar se precisar */}
-                        <div className="col-span-2 flex items-center justify-center">
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', false)}
-                            className="w-7 h-7 rounded-lg bg-emerald-500 text-slate-950 flex items-center justify-center shadow-sm shadow-emerald-500/30 active:scale-90 transition"
-                            title="Série bloqueada. Toque para destravar e editar"
-                          >
-                            <Check className="w-4 h-4 stroke-[3]" />
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      /* LINHA NORMAL EM EDIÇÃO (quando ainda não foi feita ou foi destravada) */
-                      <div className="grid grid-cols-12 gap-2 items-center p-1.5 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
-                        {/* Número da série */}
-                        <div className="col-span-2 text-center font-bold text-xs text-slate-400">
-                          #{set.set_number}
-                        </div>
-
-                        {/* Carga (Kg) */}
-                        <div className="col-span-3">
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={set.weight_kg}
-                            onChange={(e) => handleUpdateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
-                            className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
-                          />
-                        </div>
-
-                        {/* Repetições */}
-                        <div className="col-span-3">
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            placeholder="0"
-                            value={set.reps}
-                            onChange={(e) => handleUpdateSet(exIdx, setIdx, 'reps', e.target.value)}
-                            className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
-                          />
-                        </div>
-
-                        {/* Descanso */}
-                        <div className="col-span-2">
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            placeholder="60"
-                            value={set.rest_seconds}
-                            onChange={(e) => handleUpdateSet(exIdx, setIdx, 'rest_seconds', e.target.value)}
-                            className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
-                          />
-                        </div>
-
-                        {/* Botão de Marcar como Feito */}
-                        <div className="col-span-2 flex items-center justify-center">
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', true)}
-                            className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition active:scale-90"
-                            title="Marcar série como feita"
-                          >
-                            <Check className="w-5 h-5 stroke-[2.5]" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </React.Fragment>
-                ))}
-
-                {/* Botão de Adicionar mais uma série */}
-                <button
-                  type="button"
-                  onClick={() => handleAddSet(exIdx)}
-                  className="w-full py-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-950/40 border border-dashed border-slate-800 rounded-xl flex items-center justify-center gap-1 transition"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Adicionar Série
-                </button>
               </div>
+
+              {/* CORPO EXPANDIDO (Tabela de Séries + Botão Concluir Exercício) */}
+              {!isMinimized && (
+                <div className="space-y-1.5 mt-3 pt-2 border-t border-slate-800/60">
+                  <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
+                    <div className="col-span-2 text-center">Série</div>
+                    <div className="col-span-3 text-center">Kg</div>
+                    <div className="col-span-3 text-center">Reps</div>
+                    <div className="col-span-2 text-center">Desc.</div>
+                    <div className="col-span-2 text-center">Feito</div>
+                  </div>
+
+                  {item.sets.map((set, setIdx) => (
+                    <React.Fragment key={setIdx}>
+                      {set.completed ? (
+                        /* LINHA MINIMIZADA E BLOQUEADA (quando a série está Feita) */
+                        <div className="grid grid-cols-12 gap-2 items-center py-1.5 px-2.5 rounded-xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
+                          <div className="col-span-2 text-center font-bold text-xs text-emerald-400/80 flex items-center justify-center gap-1">
+                            #{set.set_number}
+                          </div>
+
+                          <div className="col-span-3 text-center">
+                            <span className="text-xs font-black text-white">{set.weight_kg}</span>
+                            <span className="text-[10px] text-slate-400 font-normal ml-0.5">kg</span>
+                          </div>
+
+                          <div className="col-span-3 text-center">
+                            <span className="text-xs font-black text-white">{set.reps}</span>
+                            <span className="text-[10px] text-slate-400 font-normal ml-0.5">reps</span>
+                          </div>
+
+                          <div className="col-span-2 text-center text-[10px] text-slate-400">
+                            {set.rest_seconds || 60}s
+                          </div>
+
+                          <div className="col-span-2 flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', false)}
+                              className="w-7 h-7 rounded-lg bg-emerald-500 text-slate-950 flex items-center justify-center shadow-sm shadow-emerald-500/30 active:scale-90 transition"
+                              title="Toque para destravar e editar"
+                            >
+                              <Check className="w-4 h-4 stroke-[3]" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* LINHA NORMAL EM EDIÇÃO (quando ainda não foi feita ou foi destravada) */
+                        <div className="grid grid-cols-12 gap-2 items-center p-1.5 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
+                          <div className="col-span-2 text-center font-bold text-xs text-slate-400">
+                            #{set.set_number}
+                          </div>
+
+                          <div className="col-span-3">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={set.weight_kg}
+                              onChange={(e) => handleUpdateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
+                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+
+                          <div className="col-span-3">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="0"
+                              value={set.reps}
+                              onChange={(e) => handleUpdateSet(exIdx, setIdx, 'reps', e.target.value)}
+                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+
+                          <div className="col-span-2">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="60"
+                              value={set.rest_seconds}
+                              onChange={(e) => handleUpdateSet(exIdx, setIdx, 'rest_seconds', e.target.value)}
+                              className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+
+                          <div className="col-span-2 flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', true)}
+                              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition active:scale-90"
+                              title="Marcar série como feita"
+                            >
+                              <Check className="w-5 h-5 stroke-[2.5]" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </React.Fragment>
+                  ))}
+
+                  {/* Ações do Exercício: Adicionar Série e Finalizar Exercício */}
+                  <div className="grid grid-cols-2 gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleAddSet(exIdx)}
+                      className="py-2.5 text-xs font-semibold text-slate-400 hover:text-white bg-slate-950/60 border border-dashed border-slate-800 rounded-xl flex items-center justify-center gap-1 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Adicionar Série
+                    </button>
+
+                    {/* BOTÃO FINALIZAR EXERCÍCIO (Minimiza o card completo) */}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleMinimizeExercise(exIdx)}
+                      className="py-2.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-1.5 transition active:scale-95"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Concluir Exercício
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

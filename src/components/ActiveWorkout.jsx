@@ -4,7 +4,7 @@ import confetti from 'canvas-confetti';
 import { 
   Play, Plus, Check, Trash2, Clock, Dumbbell, 
   ChevronDown, Flame, Sparkles, AlertCircle, ArrowLeft,
-  ShieldCheck, CheckCircle2, X
+  ShieldCheck, CheckCircle2, X, Lock, Unlock
 } from 'lucide-react';
 
 export default function ActiveWorkout({ 
@@ -237,11 +237,26 @@ export default function ActiveWorkout({
     }
   }
 
-  // Alterar dados de uma série
+  // Alterar dados de uma série com Auto-Completar Inteligente
   function handleUpdateSet(exIndex, setIndex, field, value) {
     setSessionExercises(prev => {
       const updated = [...prev];
-      updated[exIndex].sets[setIndex][field] = value;
+      const currentSet = { ...updated[exIndex].sets[setIndex], [field]: value };
+
+      // Se for alteração direta de 'completed' (clique no botão de feito/desbloquear)
+      if (field === 'completed') {
+        currentSet.completed = value;
+      } 
+      // Auto-marca como "Feito" quando digitar repetições (se o peso já estiver preenchido)
+      else if (field === 'reps' && value && String(value).trim() !== '' && currentSet.weight_kg !== '') {
+        currentSet.completed = true;
+      }
+      // Auto-marca como "Feito" quando preencher peso (se as repetições já estiverem preenchidas)
+      else if (field === 'weight_kg' && value && String(value).trim() !== '' && currentSet.reps !== '') {
+        currentSet.completed = true;
+      }
+
+      updated[exIndex].sets[setIndex] = currentSet;
       return updated;
     });
   }
@@ -543,8 +558,8 @@ export default function ActiveWorkout({
               </div>
 
               {/* Tabela de Séries */}
-              <div className="space-y-2 mt-3">
-                <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1">
+              <div className="space-y-1.5 mt-3">
+                <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pb-0.5">
                   <div className="col-span-2 text-center">Série</div>
                   <div className="col-span-3 text-center">Kg</div>
                   <div className="col-span-3 text-center">Reps</div>
@@ -553,70 +568,102 @@ export default function ActiveWorkout({
                 </div>
 
                 {item.sets.map((set, setIdx) => (
-                  <div
-                    key={setIdx}
-                    className={`grid grid-cols-12 gap-2 items-center p-1.5 rounded-2xl border transition ${
-                      set.completed 
-                        ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200' 
-                        : 'bg-slate-950 border-slate-800'
-                    }`}
-                  >
-                    {/* Número da série */}
-                    <div className="col-span-2 text-center font-bold text-xs text-slate-400">
-                      #{set.set_number}
-                    </div>
+                  <React.Fragment key={setIdx}>
+                    {set.completed ? (
+                      /* LINHA MINIMIZADA E BLOQUEADA (quando a série está Feita) */
+                      <div className="grid grid-cols-12 gap-2 items-center py-1.5 px-2.5 rounded-xl border bg-emerald-950/20 border-emerald-500/30 text-emerald-300 transition-all">
+                        {/* Número da série com cadeadinho discreto */}
+                        <div className="col-span-2 text-center font-bold text-xs text-emerald-400/80 flex items-center justify-center gap-1">
+                          #{set.set_number}
+                        </div>
 
-                    {/* Carga (Kg) */}
-                    <div className="col-span-3">
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        placeholder="0"
-                        value={set.weight_kg}
-                        onChange={(e) => handleUpdateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
-                        className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
+                        {/* Carga (Kg) minimizada e visível */}
+                        <div className="col-span-3 text-center">
+                          <span className="text-xs font-black text-white">{set.weight_kg}</span>
+                          <span className="text-[10px] text-slate-400 font-normal ml-0.5">kg</span>
+                        </div>
 
-                    {/* Repetições */}
-                    <div className="col-span-3">
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={set.reps}
-                        onChange={(e) => handleUpdateSet(exIdx, setIdx, 'reps', e.target.value)}
-                        className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
+                        {/* Repetições minimizadas */}
+                        <div className="col-span-3 text-center">
+                          <span className="text-xs font-black text-white">{set.reps}</span>
+                          <span className="text-[10px] text-slate-400 font-normal ml-0.5">reps</span>
+                        </div>
 
-                    {/* Descanso */}
-                    <div className="col-span-2">
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        placeholder="60"
-                        value={set.rest_seconds}
-                        onChange={(e) => handleUpdateSet(exIdx, setIdx, 'rest_seconds', e.target.value)}
-                        className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
+                        {/* Descanso */}
+                        <div className="col-span-2 text-center text-[10px] text-slate-400">
+                          {set.rest_seconds || 60}s
+                        </div>
 
-                    {/* Botão de Concluído */}
-                    <div className="col-span-2 flex items-center justify-center">
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', !set.completed)}
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center transition active:scale-90 ${
-                          set.completed
-                            ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                            : 'bg-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        <Check className="w-5 h-5 stroke-[2.5]" />
-                      </button>
-                    </div>
-                  </div>
+                        {/* Botão para Desbloquear e Editar se precisar */}
+                        <div className="col-span-2 flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', false)}
+                            className="w-7 h-7 rounded-lg bg-emerald-500 text-slate-950 flex items-center justify-center shadow-sm shadow-emerald-500/30 active:scale-90 transition"
+                            title="Série bloqueada. Toque para destravar e editar"
+                          >
+                            <Check className="w-4 h-4 stroke-[3]" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* LINHA NORMAL EM EDIÇÃO (quando ainda não foi feita ou foi destravada) */
+                      <div className="grid grid-cols-12 gap-2 items-center p-1.5 rounded-2xl border bg-slate-950 border-slate-800 transition-all">
+                        {/* Número da série */}
+                        <div className="col-span-2 text-center font-bold text-xs text-slate-400">
+                          #{set.set_number}
+                        </div>
+
+                        {/* Carga (Kg) */}
+                        <div className="col-span-3">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={set.weight_kg}
+                            onChange={(e) => handleUpdateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
+                            className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        {/* Repetições */}
+                        <div className="col-span-3">
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={set.reps}
+                            onChange={(e) => handleUpdateSet(exIdx, setIdx, 'reps', e.target.value)}
+                            className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        {/* Descanso */}
+                        <div className="col-span-2">
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            placeholder="60"
+                            value={set.rest_seconds}
+                            onChange={(e) => handleUpdateSet(exIdx, setIdx, 'rest_seconds', e.target.value)}
+                            className="w-full text-center bg-slate-900 border border-slate-700 rounded-xl py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        {/* Botão de Marcar como Feito */}
+                        <div className="col-span-2 flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSet(exIdx, setIdx, 'completed', true)}
+                            className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition active:scale-90"
+                            title="Marcar série como feita"
+                          >
+                            <Check className="w-5 h-5 stroke-[2.5]" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </React.Fragment>
                 ))}
 
                 {/* Botão de Adicionar mais uma série */}

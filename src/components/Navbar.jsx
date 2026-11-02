@@ -1,10 +1,11 @@
 import React from 'react';
-import { Dumbbell, ClipboardList, TrendingUp, Scale, LogOut, Building2 } from 'lucide-react';
+import { Dumbbell, ClipboardList, Layers, TrendingUp, Scale, LogOut, Building2 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, currentProfile, onSwitchProfile, currentGym, onOpenGymModal }) {
   const tabs = [
     { id: 'workout', label: 'Treinar', icon: Dumbbell },
     { id: 'templates', label: 'Fichas', icon: ClipboardList },
+    { id: 'exercises', label: 'Exercícios', icon: Layers },
     { id: 'evolution', label: 'Evolução', icon: TrendingUp },
     { id: 'body', label: 'Medidas', icon: Scale },
   ];
@@ -47,9 +48,9 @@ export default function Navbar({ activeTab, setActiveTab, currentProfile, onSwit
         </div>
       </header>
 
-      {/* Bottom Nav Bar (Fixa para celular) */}
+      {/* Bottom Nav Bar (Fixa para celular - 5 abas) */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 pb-safe">
-        <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-2">
+        <div className="max-w-lg mx-auto flex items-center justify-around px-1 py-1.5">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -57,16 +58,16 @@ export default function Navbar({ activeTab, setActiveTab, currentProfile, onSwit
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all ${
+                className={`flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
                   isActive
                     ? 'text-emerald-400 scale-105'
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
                 <div className={`p-1 rounded-xl transition ${isActive ? 'bg-emerald-500/10' : ''}`}>
-                  <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5]' : 'stroke-2'}`} />
+                  <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${isActive ? 'stroke-[2.5]' : 'stroke-2'}`} />
                 </div>
-                <span className={`text-[11px] font-medium mt-0.5 ${isActive ? 'font-bold' : ''}`}>
+                <span className={`text-[10px] font-medium mt-0.5 ${isActive ? 'font-bold' : ''}`}>
                   {tab.label}
                 </span>
               </button>

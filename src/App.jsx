@@ -4,6 +4,7 @@ import ProfileSelector from './components/ProfileSelector';
 import Navbar from './components/Navbar';
 import ActiveWorkout from './components/ActiveWorkout';
 import WorkoutTemplates from './components/WorkoutTemplates';
+import ExerciseLibrary from './components/ExerciseLibrary';
 import Evolution from './components/Evolution';
 import BodyMetrics from './components/BodyMetrics';
 import GymManager from './components/GymManager';
@@ -14,7 +15,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [activeTab, setActiveTab] = useState('workout'); // 'workout' | 'templates' | 'evolution' | 'body'
+  const [activeTab, setActiveTab] = useState('workout'); // 'workout' | 'templates' | 'exercises' | 'evolution' | 'body'
   const [gyms, setGyms] = useState([]);
   const [currentGym, setCurrentGym] = useState(null);
   const [showGymModal, setShowGymModal] = useState(false);
@@ -101,6 +102,10 @@ export default function App() {
 
         {activeTab === 'templates' && (
           <WorkoutTemplates profile={currentProfile} />
+        )}
+
+        {activeTab === 'exercises' && (
+          <ExerciseLibrary profile={currentProfile} />
         )}
 
         {activeTab === 'evolution' && (

@@ -79,21 +79,7 @@ export default function ProfileSelector({ onSelectProfile }) {
         { profile_id: data.id, name: 'Segunda Academia' }
       ]);
 
-      // Adiciona alguns exercícios básicos de musculação
-      const defaultExercises = [
-        { profile_id: data.id, name: 'Supino Reto Barra', muscle_group: 'Peito', type: 'free_weight' },
-        { profile_id: data.id, name: 'Crucifixo na Máquina', muscle_group: 'Peito', type: 'machine' },
-        { profile_id: data.id, name: 'Puxada Alta (Polia)', muscle_group: 'Costas', type: 'machine' },
-        { profile_id: data.id, name: 'Remada Curvada Halter', muscle_group: 'Costas', type: 'free_weight' },
-        { profile_id: data.id, name: 'Leg Press 45', muscle_group: 'Pernas', type: 'machine' },
-        { profile_id: data.id, name: 'Agachamento Livre', muscle_group: 'Pernas', type: 'free_weight' },
-        { profile_id: data.id, name: 'Desenvolvimento Máquina', muscle_group: 'Ombros', type: 'machine' },
-        { profile_id: data.id, name: 'Elevação Lateral Halter', muscle_group: 'Ombros', type: 'free_weight' },
-        { profile_id: data.id, name: 'Tríceps Polia Corda', muscle_group: 'Tríceps', type: 'machine' },
-        { profile_id: data.id, name: 'Rosca Direta Halter', muscle_group: 'Bíceps', type: 'free_weight' },
-      ];
-      await supabase.from('exercises').insert(defaultExercises);
-
+      // Perfis iniciam com a lista de exercícios zerada (o próprio usuário cria os seus)
       setShowCreateModal(false);
       setNewName('');
       setNewPin('');
@@ -162,7 +148,7 @@ export default function ProfileSelector({ onSelectProfile }) {
 
             <button
               type="submit"
-              className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-2xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+              className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-2xl shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center justify-center gap-2"
             >
               Entrar no Treino <ArrowRight className="w-4 h-4" />
             </button>

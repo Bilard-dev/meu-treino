@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { TrendingUp, Calendar, Building2, Dumbbell, ChevronRight, ChevronDown, Trash2, Award, Copy, Check } from 'lucide-react';
+import { 
+  TrendingUp, Calendar, Building2, Dumbbell, ChevronRight, 
+  ChevronDown, Trash2, Award, Copy, Check, WifiOff, CloudUpload 
+} from 'lucide-react';
+import { 
+  getCachedData, 
+  setCachedData, 
+  getPendingWorkouts, 
+  removePendingWorkout 
+} from '../offlineStorage';
 
 // Agrupa as séries por exercício mantendo estritamente a ordem que foram executadas
 function groupSetsByExercise(sets) {
@@ -22,7 +31,7 @@ function groupSetsByExercise(sets) {
   return Array.from(exerciseMap.values());
 }
 
-export default function Evolution({ profile, gyms }) {
+export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onTriggerSync }) {
   const [activeSubTab, setActiveSubTab] = useState('history'); // 'history' | 'charts'
   const [sessions, setSessions] = useState([]);
   const [exercises, setExercises] = useState([]);
@@ -50,7 +59,29 @@ export default function Evolution({ profile, gyms }) {
   }, [selectedExerciseId]);
 
   async function loadSessions() {
-    setLoading(true);
+    // 1. Carrega do cache local e treinos pendentes offline imediatamente
+    const cached = getCachedData(`meu_treino_sessions_${profile.id}`, []);
+    const pending = getPendingWorkouts().filter(p => p.session.profile_id === profile.id);
+
+    const pendingSetsMap = {};
+    const pendingFormatted = pending.map(p => {
+      pendingSetsMap[p.session.id] = p.sets;
+      const gFound = gyms?.find(g => g.id === p.session.gym_id);
+      return {
+        ...p.session,
+        gyms: gFound || { name: 'Academia' },
+        is_pending: true
+      };
+    });
+
+    setSessionSets(prev => ({ ...prev, ...pendingSetsMap }));
+    const combinedInitial = [...pendingFormatted, ...cached];
+    if (combinedInitial.length > 0) {
+      setSessions(combinedInitial);
+      setLoading(false);
+    }
+
+    // 2. Busca do Supabase se online
     try {
       const { data, error } = await supabase
         .from('workout_sessions')
@@ -63,15 +94,25 @@ export default function Evolution({ profile, gyms }) {
         .order('date', { ascending: false });
 
       if (error) throw error;
-      setSessions(data || []);
+      if (data) {
+        setCachedData(`meu_treino_sessions_${profile.id}`, data);
+        setSessions([...pendingFormatted, ...data]);
+      }
     } catch (err) {
-      console.error('Erro ao carregar histórico:', err);
+      console.warn('Aviso: Operando em modo offline no histórico:', err);
     } finally {
       setLoading(false);
     }
   }
 
   async function loadExercises() {
+    // Carrega do cache primeiro
+    const cachedExs = getCachedData(`meu_treino_exercises_${profile.id}`);
+    if (cachedExs && cachedExs.length > 0) {
+      setExercises(cachedExs);
+      if (!selectedExerciseId) setSelectedExerciseId(cachedExs[0].id);
+    }
+
     try {
       const { data } = await supabase
         .from('exercises')
@@ -79,12 +120,15 @@ export default function Evolution({ profile, gyms }) {
         .eq('profile_id', profile.id)
         .order('name', { ascending: true });
 
-      setExercises(data || []);
-      if (data && data.length > 0 && !selectedExerciseId) {
-        setSelectedExerciseId(data[0].id);
+      if (data) {
+        setExercises(data);
+        setCachedData(`meu_treino_exercises_${profile.id}`, data);
+        if (data.length > 0 && !selectedExerciseId) {
+          setSelectedExerciseId(data[0].id);
+        }
       }
     } catch (err) {
-      console.error('Erro ao carregar exercícios:', err);
+      console.warn('Aviso: Operando em modo offline para carregar exercícios:', err);
     }
   }
 
@@ -120,7 +164,11 @@ export default function Evolution({ profile, gyms }) {
     e.stopPropagation();
     if (!confirm('Deseja excluir este treino do seu histórico?')) return;
     try {
-      await supabase.from('workout_sessions').delete().eq('id', sessionId);
+      if (String(sessionId).startsWith('offline_')) {
+        removePendingWorkout(sessionId);
+      } else {
+        await supabase.from('workout_sessions').delete().eq('id', sessionId);
+      }
       setSessions(prev => prev.filter(s => s.id !== sessionId));
     } catch (err) {
       console.error('Erro ao excluir treino:', err);
@@ -176,7 +224,7 @@ export default function Evolution({ profile, gyms }) {
         setChartData(formatted);
       }
     } catch (err) {
-      console.error('Erro ao buscar evolução do exercício:', err);
+      console.warn('Aviso: Operando em modo offline no gráfico:', err);
     } finally {
       setLoadingChart(false);
     }
@@ -221,6 +269,27 @@ export default function Evolution({ profile, gyms }) {
       {/* ----------------- SUB-ABA 1: HISTÓRICO EM LISTA ----------------- */}
       {activeSubTab === 'history' && (
         <div>
+          {/* Banner de treinos salvos offline aguardando sincronização */}
+          {pendingWorkoutsCount > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between gap-2 mb-4">
+              <div className="flex items-center gap-2 text-xs text-amber-300">
+                <CloudUpload className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Você tem <strong>{pendingWorkoutsCount} treino(s)</strong> salvo(s) no celular.
+                </span>
+              </div>
+              {onTriggerSync && (
+                <button
+                  type="button"
+                  onClick={onTriggerSync}
+                  className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition active:scale-95 shrink-0"
+                >
+                  Sincronizar
+                </button>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="py-12 text-center text-slate-500 text-xs">Carregando histórico...</div>
           ) : sessions.length === 0 ? (
@@ -260,7 +329,14 @@ export default function Evolution({ profile, gyms }) {
                           </span>
                         </div>
                         <div>
-                          <h4 className="font-bold text-white text-sm">{s.name}</h4>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-bold text-white text-sm">{s.name}</h4>
+                            {s.is_pending && (
+                              <span className="text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/25 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                <WifiOff className="w-2.5 h-2.5" /> Salvo no celular
+                              </span>
+                            )}
+                          </div>
                           <span className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                             <Building2 className="w-3 h-3 text-slate-500" />
                             {s.gyms?.name || 'Academia'} • {formattedDate}
@@ -327,7 +403,7 @@ export default function Evolution({ profile, gyms }) {
                                       const displayWeight = isBw && (!st.weight_kg || parseFloat(st.weight_kg) === 0) ? 'Corpo' : `${st.weight_kg}kg`;
                                       return (
                                         <span
-                                          key={st.id}
+                                          key={st.id || `${idx}-${st.set_number}`}
                                           className="text-[11px] bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-xl text-slate-300 font-mono"
                                         >
                                           #{st.set_number}: <strong className="text-emerald-400">{displayWeight}</strong> × {st.reps} reps

@@ -4,6 +4,7 @@ import {
   Plus, Edit2, Trash2, Search, Dumbbell, History, 
   Sparkles, Check, X, ChevronDown, ChevronUp, Award, Layers, AlertCircle 
 } from 'lucide-react';
+import { getCachedData, setCachedData } from '../offlineStorage';
 
 const DEFAULT_MOCK_NAMES = [
   'Supino Reto Barra',
@@ -43,7 +44,13 @@ export default function ExerciseLibrary({ profile }) {
   }, [profile.id]);
 
   async function loadExercises() {
-    setLoading(true);
+    // 1. Carrega do cache local imediatamente para abrir na hora sem internet
+    const cachedExs = getCachedData(`meu_treino_exercises_${profile.id}`);
+    if (cachedExs) {
+      setExercises(cachedExs);
+      setLoading(false);
+    }
+
     try {
       const { data, error } = await supabase
         .from('exercises')
@@ -52,9 +59,12 @@ export default function ExerciseLibrary({ profile }) {
         .order('name', { ascending: true });
 
       if (error) throw error;
-      setExercises(data || []);
+      if (data) {
+        setExercises(data);
+        setCachedData(`meu_treino_exercises_${profile.id}`, data);
+      }
     } catch (err) {
-      console.error('Erro ao buscar exercícios:', err);
+      console.warn('Aviso: Operando em modo offline na biblioteca de exercícios:', err);
     } finally {
       setLoading(false);
     }

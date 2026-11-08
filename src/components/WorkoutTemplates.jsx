@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Plus, Trash2, Edit2, ClipboardList, Dumbbell, Check, X } from 'lucide-react';
+import { getCachedData, setCachedData } from '../offlineStorage';
 
 export default function WorkoutTemplates({ profile }) {
   const [templates, setTemplates] = useState([]);
@@ -24,7 +25,17 @@ export default function WorkoutTemplates({ profile }) {
   }, [profile.id]);
 
   async function loadData() {
-    setLoading(true);
+    // 1. Carrega do cache local imediatamente para abrir na hora sem internet
+    const cachedTpls = getCachedData(`meu_treino_templates_${profile.id}`);
+    if (cachedTpls) {
+      setTemplates(cachedTpls);
+      setLoading(false);
+    }
+    const cachedExs = getCachedData(`meu_treino_exercises_${profile.id}`);
+    if (cachedExs) {
+      setExercises(cachedExs);
+    }
+
     try {
       const { data: tpls } = await supabase
         .from('workout_templates')
@@ -38,7 +49,10 @@ export default function WorkoutTemplates({ profile }) {
         .eq('profile_id', profile.id)
         .order('created_at', { ascending: true });
 
-      setTemplates(tpls || []);
+      if (tpls) {
+        setTemplates(tpls);
+        setCachedData(`meu_treino_templates_${profile.id}`, tpls);
+      }
 
       const { data: exs } = await supabase
         .from('exercises')
@@ -46,9 +60,12 @@ export default function WorkoutTemplates({ profile }) {
         .eq('profile_id', profile.id)
         .order('name', { ascending: true });
 
-      setExercises(exs || []);
+      if (exs) {
+        setExercises(exs);
+        setCachedData(`meu_treino_exercises_${profile.id}`, exs);
+      }
     } catch (err) {
-      console.error('Erro ao carregar fichas:', err);
+      console.warn('Aviso: Operando em modo offline nas fichas:', err);
     } finally {
       setLoading(false);
     }

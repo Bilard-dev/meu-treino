@@ -1,7 +1,17 @@
 import React from 'react';
-import { Dumbbell, ClipboardList, Layers, TrendingUp, Scale, LogOut, Building2 } from 'lucide-react';
+import { Dumbbell, ClipboardList, Layers, TrendingUp, Scale, LogOut, Building2, CloudUpload, WifiOff } from 'lucide-react';
 
-export default function Navbar({ activeTab, setActiveTab, currentProfile, onSwitchProfile, currentGym, onOpenGymModal }) {
+export default function Navbar({ 
+  activeTab, 
+  setActiveTab, 
+  currentProfile, 
+  onSwitchProfile, 
+  currentGym, 
+  onOpenGymModal,
+  pendingWorkoutsCount = 0,
+  onTriggerSync,
+  isOfflineMode = false
+}) {
   const tabs = [
     { id: 'workout', label: 'Treinar', icon: Dumbbell },
     { id: 'templates', label: 'Fichas', icon: ClipboardList },
@@ -21,11 +31,30 @@ export default function Navbar({ activeTab, setActiveTab, currentProfile, onSwit
             </div>
             <div>
               <span className="text-xs text-slate-400 block leading-tight">Treinando como</span>
-              <span className="text-sm font-bold text-white block leading-tight">{currentProfile?.name}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-bold text-white leading-tight">{currentProfile?.name}</span>
+                {isOfflineMode && (
+                  <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.2 rounded-full font-semibold flex items-center gap-0.5" title="Modo Offline">
+                    <WifiOff className="w-2.5 h-2.5" /> Offline
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Botão de Sincronização Pendente (se houver treinos salvos offline) */}
+            {pendingWorkoutsCount > 0 && (
+              <button
+                onClick={onTriggerSync}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 rounded-xl text-[11px] text-emerald-300 font-bold active:scale-95 transition"
+                title="Sincronizar treinos com a nuvem"
+              >
+                <CloudUpload className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
+                <span>{pendingWorkoutsCount}</span>
+              </button>
+            )}
+
             {/* Seletor Rápido de Academia */}
             <button
               onClick={onOpenGymModal}

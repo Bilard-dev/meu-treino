@@ -5,8 +5,15 @@ import {
   Play, Plus, Check, Trash2, Dumbbell, 
   ChevronDown, ChevronUp, Flame, Sparkles, AlertCircle, ArrowLeft,
   ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle, Edit2,
-  Calendar, Trophy, Share2, Copy
+  Calendar, Trophy, Share2, Copy, WifiOff
 } from 'lucide-react';
+import { 
+  getCachedData, 
+  setCachedData, 
+  isOnline, 
+  queueOfflineWorkout, 
+  getPendingWorkouts 
+} from '../offlineStorage';
 
 export default function ActiveWorkout({ 
   profile, 
@@ -33,6 +40,7 @@ export default function ActiveWorkout({
   const [showFinishConfirmModal, setShowFinishConfirmModal] = useState(false);
   const [restoredNotice, setRestoredNotice] = useState(false);
   const [finishedReportText, setFinishedReportText] = useState(null);
+  const [isOfflineSavedNotice, setIsOfflineSavedNotice] = useState(false);
 
   // Chave única para salvar o rascunho no celular (Anti-Perda)
   const DRAFT_STORAGE_KEY = `meu_treino_active_draft_${profile.id}`;
@@ -104,9 +112,30 @@ export default function ActiveWorkout({
   }, [activeSession, sessionExercises]);
 
   async function loadInitialData() {
-    setLoading(true);
+    // 1. Carrega imediatamente do cache local para resposta instantânea mesmo offline
+    const cachedTpls = getCachedData(`meu_treino_templates_${profile.id}`);
+    if (cachedTpls) {
+      setTemplates(cachedTpls);
+      setLoading(false);
+    }
+
+    const cachedExs = getCachedData(`meu_treino_exercises_${profile.id}`);
+    if (cachedExs) {
+      setAllExercises(cachedExs);
+    }
+
+    const cachedSessions = getCachedData(`meu_treino_sessions_${profile.id}`, []);
+    const pendingSessions = getPendingWorkouts()
+      .filter(p => p.session.profile_id === profile.id)
+      .map(p => p.session);
+    const combinedInitialSessions = [...pendingSessions, ...cachedSessions];
+    if (combinedInitialSessions.length > 0) {
+      setPastSessions(combinedInitialSessions);
+      calculateFrequencies(combinedInitialSessions);
+    }
+
+    // 2. Tenta buscar dados novos do Supabase se houver conexão
     try {
-      // 1. Carregar fichas base do usuário
       const { data: tpls } = await supabase
         .from('workout_templates')
         .select(`
@@ -119,18 +148,22 @@ export default function ActiveWorkout({
         .eq('profile_id', profile.id)
         .order('created_at', { ascending: true });
 
-      setTemplates(tpls || []);
+      if (tpls) {
+        setTemplates(tpls);
+        setCachedData(`meu_treino_templates_${profile.id}`, tpls);
+      }
 
-      // 2. Carregar todos os exercícios para o caso de querer adicionar avulso
       const { data: exs } = await supabase
         .from('exercises')
         .select('*')
         .eq('profile_id', profile.id)
         .order('name', { ascending: true });
 
-      setAllExercises(exs || []);
+      if (exs) {
+        setAllExercises(exs);
+        setCachedData(`meu_treino_exercises_${profile.id}`, exs);
+      }
 
-      // 3. Carregar sessões passadas para o calendário e contadores de frequência
       const { data: sessions } = await supabase
         .from('workout_sessions')
         .select('id, name, date')
@@ -138,25 +171,34 @@ export default function ActiveWorkout({
         .order('date', { ascending: false });
 
       if (sessions) {
-        setPastSessions(sessions);
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth();
-
-        const countYear = sessions.filter(s => new Date(s.date).getFullYear() === currentYear).length;
-        const countMonth = sessions.filter(s => {
-          const d = new Date(s.date);
-          return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
-        }).length;
-
-        setYearCount(countYear);
-        setMonthCount(countMonth);
+        setCachedData(`meu_treino_sessions_${profile.id}`, sessions);
+        const pending = getPendingWorkouts()
+          .filter(p => p.session.profile_id === profile.id)
+          .map(p => p.session);
+        const combined = [...pending, ...sessions];
+        setPastSessions(combined);
+        calculateFrequencies(combined);
       }
     } catch (err) {
-      console.error('Erro ao carregar dados do treino:', err);
+      console.warn('Aviso: Carregando dados locais em modo offline:', err);
     } finally {
       setLoading(false);
     }
+  }
+
+  function calculateFrequencies(sessionsList) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    const countYear = sessionsList.filter(s => new Date(s.date).getFullYear() === currentYear).length;
+    const countMonth = sessionsList.filter(s => {
+      const d = new Date(s.date);
+      return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    }).length;
+
+    setYearCount(countYear);
+    setMonthCount(countMonth);
   }
 
   // Buscar última carga inteligente para um exercício:
@@ -164,6 +206,15 @@ export default function ActiveWorkout({
   // 2. Se for máquina e não houver registro na academia atual, mostra o maior peso de outra academia como referência.
   async function fetchLastLoad(exercise) {
     if (!exercise) return;
+    const cacheKey = `meu_treino_lastloads_${profile.id}`;
+    const cachedLoads = getCachedData(cacheKey, {});
+    if (cachedLoads[exercise.id]) {
+      setLastLoads(prev => ({
+        ...prev,
+        [exercise.id]: cachedLoads[exercise.id]
+      }));
+    }
+
     try {
       const { data, error } = await supabase
         .from('workout_sets')
@@ -176,11 +227,6 @@ export default function ActiveWorkout({
 
       if (error) throw error;
       if (!data || data.length === 0) {
-        setLastLoads(prev => {
-          const next = { ...prev };
-          delete next[exercise.id];
-          return next;
-        });
         return;
       }
 
@@ -219,18 +265,22 @@ export default function ActiveWorkout({
         });
 
         const best = chosenSets[0];
+        const loadInfo = {
+          weight: best.weight_kg,
+          reps: best.reps,
+          gymName: best.workout_sessions?.gyms?.name || 'Outra academia',
+          isReference: isReference
+        };
+
         setLastLoads(prev => ({
           ...prev,
-          [exercise.id]: {
-            weight: best.weight_kg,
-            reps: best.reps,
-            gymName: best.workout_sessions?.gyms?.name || 'Outra academia',
-            isReference: isReference
-          }
+          [exercise.id]: loadInfo
         }));
+        cachedLoads[exercise.id] = loadInfo;
+        setCachedData(cacheKey, cachedLoads);
       }
     } catch (err) {
-      console.error('Erro ao buscar última carga:', err);
+      console.warn('Aviso: Usando carga em cache para o exercício offline:', exercise.name);
     }
   }
 
@@ -493,22 +543,10 @@ export default function ActiveWorkout({
 
     setSaving(true);
     try {
-      // 1. Cria a sessão no banco
-      const { data: sessionData, error: sessionError } = await supabase
-        .from('workout_sessions')
-        .insert([{
-          profile_id: profile.id,
-          gym_id: currentGym?.id || null,
-          template_id: activeSession.template_id,
-          name: activeSession.name,
-          date: new Date().toISOString()
-        }])
-        .select()
-        .single();
+      const isDeviceOnline = isOnline();
+      let wasOfflineSaved = false;
 
-      if (sessionError) throw sessionError;
-
-      // 2. Cria as séries registradas mantendo estritamente a ordem dos exercícios e séries
+      // 1. Cria as séries registradas mantendo estritamente a ordem dos exercícios e séries
       const setsToInsert = [];
       const baseTime = new Date().getTime();
       let orderOffset = 0;
@@ -517,8 +555,8 @@ export default function ActiveWorkout({
           if (s.completed || s.reps) {
             orderOffset++;
             setsToInsert.push({
-              session_id: sessionData.id,
               exercise_id: item.exercise.id,
+              exercises: item.exercise, // Preserva para visualização no histórico offline
               set_number: s.set_number,
               weight_kg: parseFloat(s.weight_kg) || 0,
               reps: parseInt(s.reps, 10) || 0,
@@ -528,11 +566,63 @@ export default function ActiveWorkout({
         });
       });
 
-      if (setsToInsert.length > 0) {
-        const { error: setsError } = await supabase
-          .from('workout_sets')
-          .insert(setsToInsert);
-        if (setsError) throw setsError;
+      const sessionObj = {
+        profile_id: profile.id,
+        gym_id: currentGym?.id || null,
+        template_id: activeSession.template_id,
+        name: activeSession.name,
+        date: new Date().toISOString()
+      };
+
+      if (!isDeviceOnline) {
+        queueOfflineWorkout(sessionObj, setsToInsert);
+        wasOfflineSaved = true;
+      } else {
+        try {
+          const { data: sessionData, error: sessionError } = await supabase
+            .from('workout_sessions')
+            .insert([sessionObj])
+            .select()
+            .single();
+
+          if (sessionError) throw sessionError;
+
+          if (setsToInsert.length > 0) {
+            const setsWithSessionId = setsToInsert.map(s => ({
+              ...s,
+              session_id: sessionData.id
+            }));
+            const { error: setsError } = await supabase
+              .from('workout_sets')
+              .insert(setsWithSessionId);
+            if (setsError) throw setsError;
+          }
+        } catch (networkErr) {
+          console.warn('Falha ao conectar com o Supabase, salvando localmente na fila offline:', networkErr);
+          queueOfflineWorkout(sessionObj, setsToInsert);
+          wasOfflineSaved = true;
+        }
+      }
+
+      // Atualiza também o cache local de cargas máximas dos exercícios deste treino
+      try {
+        const cacheKey = `meu_treino_lastloads_${profile.id}`;
+        const cachedLoads = getCachedData(cacheKey, {});
+        sessionExercises.forEach(item => {
+          const validSets = item.sets.filter(s => s.completed || s.reps);
+          if (validSets.length > 0) {
+            const sorted = [...validSets].sort((a, b) => (parseFloat(b.weight_kg) || 0) - (parseFloat(a.weight_kg) || 0));
+            cachedLoads[item.exercise.id] = {
+              weight: sorted[0].weight_kg,
+              reps: sorted[0].reps,
+              gymName: currentGym?.name || 'Academia',
+              isReference: false
+            };
+          }
+        });
+        setCachedData(cacheKey, cachedLoads);
+      } catch (e) {
+        console.error(e);
       }
 
       // Solta confetes festivos!
@@ -545,6 +635,7 @@ export default function ActiveWorkout({
       // Gera o texto do relatório para cópia imediata
       const report = buildReportText(activeSession.name, currentGym?.name, sessionExercises);
       setFinishedReportText(report);
+      setIsOfflineSavedNotice(wasOfflineSaved);
 
       // Limpa o rascunho salvo no celular
       localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -552,7 +643,7 @@ export default function ActiveWorkout({
       setSessionExercises([]);
       setShowFinishConfirmModal(false);
 
-      // Recarrega estatísticas
+      // Recarrega estatísticas e histórico local
       loadInitialData();
     } catch (err) {
       console.error('Erro ao finalizar treino:', err);
@@ -655,6 +746,14 @@ export default function ActiveWorkout({
                 <X className="w-4 h-4" />
               </button>
             </div>
+            {isOfflineSavedNotice && (
+              <div className="mb-3 p-3 bg-amber-500/15 border border-amber-500/30 rounded-2xl flex items-center gap-2 text-xs text-amber-300">
+                <WifiOff className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>
+                  <strong>Salvo no celular (Modo Offline):</strong> Seu treino foi registrado com sucesso e será enviado para a nuvem automaticamente quando o celular reconectar.
+                </span>
+              </div>
+            )}
             <p className="text-xs text-slate-300 mb-3">
               Gere e copie o relatório deste treino para mostrar ao seu personal ou analisar em uma IA.
             </p>

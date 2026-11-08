@@ -17,11 +17,20 @@ export default function ProfileSelector({ onSelectProfile }) {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
+    // Carrega perfis do cache imediatamente para o caso de estar offline
+    try {
+      const cached = localStorage.getItem('meu_treino_profiles_cache');
+      if (cached) {
+        setProfiles(JSON.parse(cached));
+        setLoading(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
     loadProfiles();
   }, []);
 
   async function loadProfiles() {
-    setLoading(true);
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -29,7 +38,10 @@ export default function ProfileSelector({ onSelectProfile }) {
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      setProfiles(data || []);
+      if (data) {
+        setProfiles(data);
+        localStorage.setItem('meu_treino_profiles_cache', JSON.stringify(data));
+      }
     } catch (err) {
       console.error('Erro ao buscar perfis:', err);
     } finally {

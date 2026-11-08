@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { 
   TrendingUp, Calendar, Building2, Dumbbell, ChevronRight, 
-  ChevronDown, Trash2, Award, Copy, Check, WifiOff, CloudUpload 
+  ChevronDown, Trash2, Award, Copy, Check, WifiOff, CloudUpload, Edit2 
 } from 'lucide-react';
 import { 
   getCachedData, 
@@ -10,6 +10,7 @@ import {
   getPendingWorkouts, 
   removePendingWorkout 
 } from '../offlineStorage';
+import WorkoutEditorModal from './WorkoutEditorModal';
 
 // Agrupa as séries por exercício mantendo estritamente a ordem que foram executadas
 function groupSetsByExercise(sets) {
@@ -41,6 +42,7 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
   const [expandedSessionId, setExpandedSessionId] = useState(null);
   const [sessionSets, setSessionSets] = useState({}); // { [sessionId]: [ { exercise, set_number, weight_kg, reps } ] }
   const [copiedSessionId, setCopiedSessionId] = useState(null);
+  const [editingSession, setEditingSession] = useState(null); // Treino sendo editado
 
   // Gráficos
   const [selectedExerciseId, setSelectedExerciseId] = useState('');
@@ -160,6 +162,33 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
     }
   }
 
+  async function handleOpenEditSession(session, e) {
+    if (e) e.stopPropagation();
+    // Se as séries ainda não foram carregadas na memória para esta sessão, busca antes de abrir
+    if (!sessionSets[session.id] && !String(session.id).startsWith('offline_')) {
+      try {
+        const { data } = await supabase
+          .from('workout_sets')
+          .select(`
+            id, set_number, weight_kg, reps, created_at,
+            exercises (id, name, muscle_group, type)
+          `)
+          .eq('session_id', session.id)
+          .order('created_at', { ascending: true });
+
+        if (data) {
+          setSessionSets(prev => ({
+            ...prev,
+            [session.id]: data
+          }));
+        }
+      } catch (err) {
+        console.error('Erro ao buscar séries para edição:', err);
+      }
+    }
+    setEditingSession(session);
+  }
+
   async function handleDeleteSession(sessionId, e) {
     e.stopPropagation();
     if (!confirm('Deseja excluir este treino do seu histórico?')) return;
@@ -238,7 +267,7 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-xl font-black text-white">Sua Evolução</h2>
-          <p className="text-xs text-slate-400">Histórico de cargas e relatórios</p>
+          <p className="text-xs text-slate-400">Histórico de treinos, edição e relatórios</p>
         </div>
       </div>
 
@@ -322,7 +351,7 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
                       className="flex items-center justify-between cursor-pointer"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col items-center justify-center text-emerald-400 font-bold">
+                        <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col items-center justify-center text-emerald-400 font-bold shrink-0">
                           <span className="text-[10px] uppercase leading-none">{dateObj.getDate()}</span>
                           <span className="text-[9px] uppercase leading-none mt-0.5">
                             {dateObj.toLocaleDateString('pt-BR', { month: 'short' }).slice(0, 3)}
@@ -344,14 +373,27 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                        {/* Botão de Edição Rápida */}
                         <button
+                          type="button"
+                          onClick={(e) => handleOpenEditSession(s, e)}
+                          className="p-1.5 text-slate-400 hover:text-emerald-400 rounded-lg hover:bg-slate-800 transition"
+                          title="Editar este treino"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+
+                        {/* Botão de Excluir */}
+                        <button
+                          type="button"
                           onClick={(e) => handleDeleteSession(s.id, e)}
                           className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg transition"
                           title="Excluir treino"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
+
                         <div className="p-1 text-slate-400">
                           {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                         </div>
@@ -365,7 +407,17 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
                           <p className="text-xs text-slate-500 text-center py-2">Carregando séries...</p>
                         ) : (
                           <>
-                            <div className="flex justify-end">
+                            <div className="flex items-center justify-end gap-2 flex-wrap">
+                              {/* Botão Abrir e Editar */}
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenEditSession(s, e)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 transition active:scale-95"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" /> Editar Treino
+                              </button>
+
+                              {/* Botão Copiar Relatório */}
                               <button
                                 type="button"
                                 onClick={(e) => handleCopySessionReport(s, sets, e)}
@@ -381,7 +433,7 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
                                   </>
                                 ) : (
                                   <>
-                                    <Copy className="w-3.5 h-3.5" /> Copiar Relatório (Treinador / IA)
+                                    <Copy className="w-3.5 h-3.5" /> Copiar Relatório
                                   </>
                                 )}
                               </button>
@@ -535,6 +587,22 @@ export default function Evolution({ profile, gyms, pendingWorkoutsCount = 0, onT
             )}
           </div>
         </div>
+      )}
+
+      {/* Modal de Edição de Treino Passado */}
+      {editingSession && (
+        <WorkoutEditorModal
+          session={editingSession}
+          initialSets={sessionSets[editingSession.id] || []}
+          gyms={gyms}
+          allExercises={exercises}
+          profile={profile}
+          onSave={() => {
+            setEditingSession(null);
+            loadSessions();
+          }}
+          onClose={() => setEditingSession(null)}
+        />
       )}
     </div>
   );

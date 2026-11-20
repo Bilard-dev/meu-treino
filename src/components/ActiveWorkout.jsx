@@ -5,7 +5,7 @@ import {
   Play, Plus, Check, Trash2, Dumbbell, 
   ChevronDown, ChevronUp, Flame, Sparkles, AlertCircle, ArrowLeft,
   ShieldCheck, CheckCircle2, X, Lock, Unlock, CheckCircle, Edit2,
-  Calendar, Trophy, Share2, Copy, WifiOff
+  Calendar, Trophy, Share2, Copy, WifiOff, Building2
 } from 'lucide-react';
 import { 
   getCachedData, 
@@ -20,6 +20,7 @@ export default function ActiveWorkout({
   gyms, 
   currentGym, 
   onSelectGym, 
+  onOpenGymModal,
   onWorkoutFinished 
 }) {
   const [templates, setTemplates] = useState([]);
@@ -66,7 +67,7 @@ export default function ActiveWorkout({
   useEffect(() => {
     if (sessionExercises && sessionExercises.length > 0) {
       sessionExercises.forEach(item => {
-        if (item.exercise) fetchLastLoad(item.exercise);
+        if (item.exercise) fetchLastLoad(item.exercise, currentGym);
       });
     }
   }, [currentGym?.id]);
@@ -83,9 +84,9 @@ export default function ActiveWorkout({
           setRestoredNotice(true);
           setTimeout(() => setRestoredNotice(false), 5000);
 
-          // Recarrega cargas anteriores dos exercícios restaurados
+          // Recarrega cargas anteriores dos exercícios restaurados para a academia atual
           parsed.sessionExercises.forEach(item => {
-            if (item.exercise) fetchLastLoad(item.exercise);
+            if (item.exercise) fetchLastLoad(item.exercise, currentGym);
           });
         }
       }
@@ -204,9 +205,14 @@ export default function ActiveWorkout({
   // Buscar última carga inteligente para um exercício:
   // 1. Sempre busca o MAIOR peso da sessão mais recente.
   // 2. Se for máquina e não houver registro na academia atual, mostra o maior peso de outra academia como referência.
-  async function fetchLastLoad(exercise) {
+  // 3. Isola os caches por academia para nunca sobrescrever cargas entre academias diferentes.
+  async function fetchLastLoad(exercise, targetGym = currentGym) {
     if (!exercise) return;
-    const cacheKey = `meu_treino_lastloads_${profile.id}`;
+    const isMachine = exercise.type === 'machine';
+    const gymIdKey = isMachine ? (targetGym?.id || 'default') : 'all';
+    const cacheKey = `meu_treino_lastloads_${profile.id}_${gymIdKey}`;
+
+    // 1. Carrega imediatamente do cache isolado desta academia para resposta instantânea na tela
     const cachedLoads = getCachedData(cacheKey, {});
     if (cachedLoads[exercise.id]) {
       setLastLoads(prev => ({
@@ -216,7 +222,8 @@ export default function ActiveWorkout({
     }
 
     try {
-      const { data, error } = await supabase
+      // 2. Busca registros do banco de dados na nuvem (Supabase)
+      const { data: dbSets, error } = await supabase
         .from('workout_sets')
         .select(`
           weight_kg, reps, created_at, session_id,
@@ -226,33 +233,66 @@ export default function ActiveWorkout({
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      if (!data || data.length === 0) {
+
+      // 3. Inclui também séries da fila offline local caso existam
+      const pendingWorkouts = getPendingWorkouts().filter(p => p.session?.profile_id === profile.id);
+      const pendingSets = [];
+      pendingWorkouts.forEach(p => {
+        (p.sets || []).forEach(st => {
+          if (st.exercise_id === exercise.id) {
+            const gFound = gyms?.find(g => g.id === p.session?.gym_id);
+            pendingSets.push({
+              weight_kg: st.weight_kg,
+              reps: st.reps,
+              created_at: st.created_at || p.session?.date || new Date().toISOString(),
+              session_id: p.session?.id,
+              workout_sessions: {
+                id: p.session?.id,
+                date: p.session?.date || new Date().toISOString(),
+                gym_id: p.session?.gym_id,
+                gyms: gFound || { name: 'Academia' }
+              }
+            });
+          }
+        });
+      });
+
+      const allSets = [...pendingSets, ...(dbSets || [])];
+
+      if (allSets.length === 0) {
         return;
       }
 
-      const isMachine = exercise.type === 'machine';
+      // Ordena por data decrescente da sessão (e por data de criação em caso de empate)
+      allSets.sort((a, b) => {
+        const dateA = new Date(a.workout_sessions?.date || a.created_at).getTime();
+        const dateB = new Date(b.workout_sessions?.date || b.created_at).getTime();
+        if (dateB !== dateA) return dateB - dateA;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+
       let chosenSets = [];
       let isReference = false;
 
-      if (isMachine && currentGym?.id) {
-        // Filtra os registros da academia atual
-        const gymSets = data.filter(s => s.workout_sessions?.gym_id === currentGym.id);
+      if (isMachine && targetGym?.id) {
+        // Filtra os registros feitos na academia atual
+        const gymSets = allSets.filter(s => s.workout_sessions?.gym_id === targetGym.id);
 
         if (gymSets.length > 0) {
-          // Pega a sessão mais recente desta academia
+          // Pega a sessão mais recente DESTA academia
           const latestSessionId = gymSets[0].session_id;
           chosenSets = gymSets.filter(s => s.session_id === latestSessionId);
           isReference = false;
         } else {
           // NÃO tem registro nesta academia: usa a sessão mais recente de OUTRA academia como referência!
-          const latestSessionId = data[0].session_id;
-          chosenSets = data.filter(s => s.session_id === latestSessionId);
+          const latestSessionId = allSets[0].session_id;
+          chosenSets = allSets.filter(s => s.session_id === latestSessionId);
           isReference = true;
         }
       } else {
         // Peso livre, calistenia ou sem academia selecionada
-        const latestSessionId = data[0].session_id;
-        chosenSets = data.filter(s => s.session_id === latestSessionId);
+        const latestSessionId = allSets[0].session_id;
+        chosenSets = allSets.filter(s => s.session_id === latestSessionId);
         isReference = false;
       }
 
@@ -268,7 +308,7 @@ export default function ActiveWorkout({
         const loadInfo = {
           weight: best.weight_kg,
           reps: best.reps,
-          gymName: best.workout_sessions?.gyms?.name || 'Outra academia',
+          gymName: best.workout_sessions?.gyms?.name || (isReference ? 'Outra academia' : targetGym?.name || 'Academia'),
           isReference: isReference
         };
 
@@ -318,7 +358,7 @@ export default function ActiveWorkout({
 
     // Carrega a última carga de cada exercício
     exercisesList.forEach(item => {
-      if (item.exercise) fetchLastLoad(item.exercise);
+      if (item.exercise) fetchLastLoad(item.exercise, currentGym);
     });
   }
 
@@ -334,7 +374,7 @@ export default function ActiveWorkout({
 
   // Adicionar exercício na sessão atual
   function handleAddExerciseToSession(exercise) {
-    fetchLastLoad(exercise);
+    fetchLastLoad(exercise, currentGym);
     const isBodyweight = exercise.type === 'bodyweight';
     setSessionExercises(prev => [
       ...prev,
@@ -401,7 +441,7 @@ export default function ActiveWorkout({
       setAllExercises(prev => prev.map(e => e.id === data.id ? data : e));
 
       // Recalcula última carga com a nova tipagem
-      fetchLastLoad(data);
+      fetchLastLoad(data, currentGym);
       setEditingExerciseIdx(null);
     } catch (err) {
       console.error('Erro ao editar exercício:', err);
@@ -417,11 +457,23 @@ export default function ActiveWorkout({
     if (!newExerciseName.trim()) return;
 
     try {
+      const cleanName = newExerciseName.trim();
+      // Verifica se já existe um exercício com este mesmo nome (evita duplicatas acidentais)
+      const existing = allExercises.find(
+        ex => ex.name.toLowerCase().trim() === cleanName.toLowerCase()
+      );
+
+      if (existing) {
+        handleAddExerciseToSession(existing);
+        setNewExerciseName('');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('exercises')
         .insert([{
           profile_id: profile.id,
-          name: newExerciseName.trim(),
+          name: cleanName,
           muscle_group: newExerciseMuscle,
           type: newExerciseType
         }])
@@ -588,13 +640,18 @@ export default function ActiveWorkout({
           if (sessionError) throw sessionError;
 
           if (setsToInsert.length > 0) {
-            const setsWithSessionId = setsToInsert.map(s => ({
-              ...s,
-              session_id: sessionData.id
+            // Remove propriedades transitórias (como exercises) para enviar estritamente os campos aceitos pelo Postgres
+            const cleanSetsForCloud = setsToInsert.map(s => ({
+              session_id: sessionData.id,
+              exercise_id: s.exercise_id,
+              set_number: s.set_number,
+              weight_kg: parseFloat(s.weight_kg) || 0,
+              reps: parseInt(s.reps, 10) || 0,
+              created_at: s.created_at
             }));
             const { error: setsError } = await supabase
               .from('workout_sets')
-              .insert(setsWithSessionId);
+              .insert(cleanSetsForCloud);
             if (setsError) throw setsError;
           }
         } catch (networkErr) {
@@ -604,14 +661,19 @@ export default function ActiveWorkout({
         }
       }
 
-      // Atualiza também o cache local de cargas máximas dos exercícios deste treino
+      // Atualiza também o cache local de cargas máximas dos exercícios deste treino para esta academia
       try {
-        const cacheKey = `meu_treino_lastloads_${profile.id}`;
+        const gymIdKey = currentGym?.id || 'all';
+        const cacheKey = `meu_treino_lastloads_${profile.id}_${gymIdKey}`;
         const cachedLoads = getCachedData(cacheKey, {});
         sessionExercises.forEach(item => {
           const validSets = item.sets.filter(s => s.completed || s.reps);
           if (validSets.length > 0) {
-            const sorted = [...validSets].sort((a, b) => (parseFloat(b.weight_kg) || 0) - (parseFloat(a.weight_kg) || 0));
+            const sorted = [...validSets].sort((a, b) => {
+              const wDiff = (parseFloat(b.weight_kg) || 0) - (parseFloat(a.weight_kg) || 0);
+              if (wDiff !== 0) return wDiff;
+              return (parseInt(b.reps, 10) || 0) - (parseInt(a.reps, 10) || 0);
+            });
             cachedLoads[item.exercise.id] = {
               weight: sorted[0].weight_kg,
               reps: sorted[0].reps,
@@ -842,9 +904,24 @@ export default function ActiveWorkout({
             <Flame className="w-4 h-4 fill-emerald-400" /> HORA DO FOCO
           </div>
           <h2 className="text-xl font-black text-white mb-1">Pronto para treinar?</h2>
-          <p className="text-xs text-slate-400 mb-4">
-            Academia selecionada: <strong className="text-slate-200">{currentGym?.name || 'Nenhuma selecionada'}</strong>
-          </p>
+          <div className="flex items-center justify-between bg-slate-950/50 border border-slate-800/80 rounded-2xl px-3.5 py-2 mb-4">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-emerald-400" />
+              <div className="text-left">
+                <span className="text-[10px] text-slate-400 block leading-tight">Academia selecionada:</span>
+                <span className="text-xs font-bold text-white">{currentGym?.name || 'Nenhuma selecionada'}</span>
+              </div>
+            </div>
+            {onOpenGymModal && (
+              <button
+                type="button"
+                onClick={onOpenGymModal}
+                className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 px-2.5 py-1 rounded-xl transition"
+              >
+                Trocar
+              </button>
+            )}
+          </div>
 
           <button
             onClick={handleStartFreeWorkout}
@@ -933,7 +1010,20 @@ export default function ActiveWorkout({
             TREINANDO AGORA
           </span>
           <h2 className="text-base font-black text-white leading-tight">{activeSession.name}</h2>
-          <span className="text-[11px] text-slate-400 leading-tight block">{currentGym?.name || 'Academia'}</span>
+          {onOpenGymModal ? (
+            <button
+              type="button"
+              onClick={onOpenGymModal}
+              className="text-[11px] text-slate-400 hover:text-emerald-400 leading-tight flex items-center gap-1 transition group"
+              title="Trocar academia deste treino"
+            >
+              <Building2 className="w-3 h-3 text-emerald-400" />
+              <span className="underline decoration-slate-700 group-hover:decoration-emerald-400">{currentGym?.name || 'Academia'}</span>
+              <span className="text-[9px] bg-slate-800 text-slate-400 px-1 rounded ml-0.5">trocar</span>
+            </button>
+          ) : (
+            <span className="text-[11px] text-slate-400 leading-tight block">{currentGym?.name || 'Academia'}</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

@@ -260,6 +260,15 @@ export default function WorkoutEditorModal({
         setCachedData(`meu_treino_sessions_${profile.id}`, nextCached);
       }
 
+      // Invalida cache de últimas cargas para que os novos valores/academia apareçam de imediato
+      try {
+        Object.keys(localStorage).forEach(k => {
+          if (k.startsWith(`meu_treino_lastloads_${profile.id}`)) {
+            localStorage.removeItem(k);
+          }
+        });
+      } catch (e) {}
+
       onSave();
     } catch (err) {
       console.error('Erro ao salvar treino editado:', err);

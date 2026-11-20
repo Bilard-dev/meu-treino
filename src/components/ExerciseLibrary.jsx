@@ -133,12 +133,22 @@ export default function ExerciseLibrary({ profile }) {
 
         if (error) throw error;
       } else {
+        const cleanName = name.trim();
+        const existing = exercises.find(
+          ex => ex.name.toLowerCase().trim() === cleanName.toLowerCase()
+        );
+        if (existing) {
+          alert(`Já existe um exercício cadastrado com o nome "${existing.name}".`);
+          setSaving(false);
+          return;
+        }
+
         // Criar novo
         const { error } = await supabase
           .from('exercises')
           .insert([{
             profile_id: profile.id,
-            name: name.trim(),
+            name: cleanName,
             muscle_group: muscleGroup,
             type: type
           }]);

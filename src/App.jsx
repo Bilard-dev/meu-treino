@@ -200,6 +200,7 @@ export default function App() {
             gyms={gyms}
             currentGym={currentGym}
             onSelectGym={handleSelectGym}
+            onOpenGymModal={() => setShowGymModal(true)}
             onWorkoutFinished={() => setActiveTab('evolution')}
           />
         )}
